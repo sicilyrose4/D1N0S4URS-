@@ -29,7 +29,6 @@
 
 - `README.md` — this file: what the project is, in plain language
 - `log.md` — running work journal, updated at least weekly
-- `todo.md` — shared to-do list with owners and due dates
 - `numbers.md` — weekly tally toward 100 people reached and 5 live interactions
 - `notes/` — one file per interview, rough notes are fine
 - `team/` — one file per team member: role, current work, notes
