@@ -1,4 +1,4 @@
-# [Project Name]
+# D1N0S4URS
 
 > Rewrite this file every time the project changes. Last updated: 2026-11-03
 
