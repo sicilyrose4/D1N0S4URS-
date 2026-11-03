@@ -20,8 +20,10 @@
 
 ## Team
 
-- [Name] — [role]
-- [Name] — [role]
+- Nathan — [role]
+- Sicily — [role]
+- Quin — [role]
+- Saj — [role]
 
 ## What's in this repo
 
@@ -30,3 +32,4 @@
 - `todo.md` — shared to-do list with owners and due dates
 - `numbers.md` — weekly tally toward 100 people reached and 5 live interactions
 - `notes/` — one file per interview, rough notes are fine
+- `team/` — one file per team member: role, current work, notes
