@@ -31,5 +31,5 @@
 - `log.md` — running work journal, updated at least weekly
 - `numbers.md` — weekly tally toward 100 people reached and 5 live interactions
 - `notes/` — one file per interview, rough notes are fine
-- `team/` — one file per team member: role, current work, notes
+- `team/` — one file per team member: role, to-do list, current work, notes
 - `multiplayer/` — each person's log of 3 multiplayer things and what signaled other people were there

@@ -6,6 +6,15 @@
 
 [What are you responsible for on this project?]
 
+## To-do
+
+Check items off with `[x]`. Add a due date to every task.
+
+- [ ] Use & document 3 multiplayer things in `multiplayer/nathan.md` — due 2026-11-04
+- [ ] Interview 1 (30–60 min, recorded), notes posted to `notes/` — due [date]
+- [ ] Interview 2 (30–60 min, recorded), notes posted to `notes/` — due [date]
+- [ ] Interview 3 (30–60 min, recorded), notes posted to `notes/` — due [date]
+
 ## What I'm working on this week
 
 -
