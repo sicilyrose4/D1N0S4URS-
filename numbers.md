@@ -8,14 +8,14 @@ Running tally. Update every week.
 
 | | Count | Goal | Progress |
 |---|---|---|---|
-| People reached | 0 | 100 | 0% |
-| Live interactions | 0 | 5 | 0% |
+| People reached | 2 | 100 | 2% |
+| Live interactions | 2 | 5 | 40% |
 
 ## Weekly breakdown
 
 | Week of | Reached this week | Reached total | Live this week | Live total | How we reached them |
 |---|---|---|---|---|---|
-| 2026-11-03 | 0 | 0 | 0 | 0 | |
+| 2026-11-03 | 2 | 2 | 2 | 2 | Quin: interviews with Tate (phone) and Braedon (11/4) |
 
 ## What counts
 
