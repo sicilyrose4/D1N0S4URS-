@@ -20,4 +20,4 @@ Running tally. Update every week.
 ## What counts
 
 - **Reached:** someone who saw, responded to, or engaged with the project (survey, post, conversation, test).
-- **Live interaction:** a real-time conversation or test with one person (in person or video). Each one gets a file in `notes/`.
+- **Live interaction:** a real-time conversation or test with one person (in person or video). Each one gets a file in `interviews/`.
