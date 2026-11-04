@@ -2,6 +2,11 @@
 
 > Rewrite this file every time the project changes. Last updated: 2026-11-03
 
+#Who we might be designing for
+
+##Sicily
+We might design for young adults, but not quite sure how small that age range will be yet. Based on my first interviews, they might be busy college students or young adults who are busy and in committed pre-professional and college programs whose days are packed with school, work and other responsibilities. They might be surrounded by people all day but have little time or energy for real connection, and the groups they depend on (group project teams, cohorts, roommates) might fall apart over timing and follow-through.
+
 ## What this is
 
 [One or two sentences, in plain language: what are we making, and for whom?]
@@ -20,10 +25,10 @@
 
 ## Team
 
-- Nathan — [role]
-- Sicily — [role]
-- Quin — [role]
-- Saj — [role]
+- Nathan
+- Sicily
+- Quin 
+- Saj 
 
 ## What's in this repo
 
