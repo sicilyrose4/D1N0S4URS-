@@ -14,11 +14,19 @@ const SYSTEM = `You are secretly playing a party game called "Who's the Bot?" wi
 Someone asks a question, everyone answers anonymously, and the group votes on which answer came from the AI. Your goal is to not get caught.
 
 Write ONE answer the way a real college student types into a group game on their phone:
-- Short. Usually 2 to 12 words. Never more than 2 short sentences.
-- Casual. Mostly lowercase, light punctuation, no em dashes, no semicolons, no polished or poetic phrasing.
-- Specific and a little personal or funny, like a real memory or opinion. Not generic, not wholesome-sounding.
-- If other players' answers are shown, match their length and vibe. Do not copy them or repeat their idea.
+- Real people are lazy typers. Most answers are 1 to 5 words, often just the plain answer ("packers", "my moms car").
+- Do NOT try to be funny or clever every time. A joke or extra detail is a giveaway. Plain is usually better.
+- Casual. Mostly lowercase, little or no punctuation, no em dashes, no semicolons, nothing polished or poetic.
+- If other players' answers are shown, match their length and vibe closely. If they are short, be short. Do not copy them.
 - Never mention being an AI, never refuse, never explain. Output only the answer text.`;
+
+// Vary the bot's style per round so it doesn't have a recognizable pattern.
+function styleHint() {
+  const r = Math.random();
+  if (r < 0.45) return "Style for this answer: just the bare answer, 1 to 3 words, no explanation.";
+  if (r < 0.75) return "Style for this answer: short and plain, under 6 words.";
+  return "Style for this answer: one short casual phrase, under 10 words, with a small personal detail.";
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -63,14 +71,15 @@ async function writeAnswer(question: string, humans: string[]): Promise<string> 
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       system: SYSTEM,
-      messages: [{ role: "user", content: `Question: ${question}${others}` }],
+      messages: [{ role: "user", content: `Question: ${question}${others}\n\n${styleHint()}` }],
     } as any);
     if (response.stop_reason === "refusal") return pick();
     const text = response.content
       .filter((b: any) => b.type === "text")
       .map((b: any) => b.text)
       .join(" ");
-    return clean(text) || pick();
+    const out = clean(text) || pick();
+    return Math.random() < 0.3 ? typo(out) : out;
   } catch (e) {
     console.error("claude call failed", e);
     return pick();
@@ -79,6 +88,16 @@ async function writeAnswer(question: string, humans: string[]): Promise<string> 
 
 function clean(s: string) {
   return s.split("\n").map((l) => l.trim()).filter(Boolean)[0]?.replace(/^["'“]|["'”]$/g, "").replace(/—/g, ", ").slice(0, 160) ?? "";
+}
+// Fast-thumb typo: swap two letters, or drop one, inside a random word of 4+ letters.
+function typo(s: string) {
+  const words = s.split(" ");
+  const idx = words.map((w, i) => (/^[a-z]{4,}$/i.test(w) ? i : -1)).filter((i) => i >= 0);
+  if (!idx.length) return s;
+  const i = idx[Math.floor(Math.random() * idx.length)], w = words[i];
+  const k = 1 + Math.floor(Math.random() * (w.length - 2));
+  words[i] = Math.random() < 0.5 ? w.slice(0, k) + w[k + 1] + w[k] + w.slice(k + 2) : w.slice(0, k) + w.slice(k + 1);
+  return words.join(" ");
 }
 const pick = () => FALLBACKS[Math.floor(Math.random() * FALLBACKS.length)];
 const json = (body: unknown, status = 200) =>
