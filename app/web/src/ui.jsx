@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { COLORS } from "./game.js";
+import { pickQuestions } from "./questions.js";
 
 // Full-screen "scan to join" card for projecting in class.
 export function QrSheet({ code, onClose }) {
@@ -32,6 +33,7 @@ export const Icon = {
   check: (s = 16) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="3" {...P}><path d="M5 12l5 5 9-10" /></svg>,
   clock: (s = 14) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>,
   out: (s = 18) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10" /></svg>,
+  shuffle: (s = 16) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" /></svg>,
   qr: (s = 16) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><path d="M14 14h2v2h-2zM18 18h2v2h-2zM14 18h.01M18 14h2" /></svg>,
   link: (s = 16) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><path d="M10 14a4 4 0 006 0l3-3a4 4 0 00-6-6l-1 1M14 10a4 4 0 00-6 0l-3 3a4 4 0 006 6l1-1" /></svg>,
 };
@@ -54,14 +56,12 @@ export function useElapsed(iso) {
 }
 export const clock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-export const SUGGESTIONS = [
-  "What's a smell that instantly takes you back to being a kid?",
-  "What's the worst thing in your fridge right now?",
-  "Describe your last dream in 5 words",
-  "What's a hill you'll die on?",
-  "What did you have for breakfast, honestly?",
-  "What's the most useless thing you own?",
-];
+// 4 fresh suggestions from the catalog, skipping ones this room already asked. shuffle() deals a new hand.
+export function useQuestions(asked) {
+  const [qs, setQs] = useState(() => pickQuestions(asked));
+  const [spin, setSpin] = useState(0);
+  return { qs, spin, shuffle: () => { setQs(pickQuestions(asked)); setSpin((n) => n + 1) } };
+}
 
 export const inviteLink = (code) => `${location.origin}${location.pathname}?room=${code}`;
 

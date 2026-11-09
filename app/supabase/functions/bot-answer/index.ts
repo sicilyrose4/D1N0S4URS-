@@ -8,7 +8,7 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const FALLBACKS = ["honestly no clue lol", "probably pizza", "my moms car", "idk depends on the day", "the smell of rain on hot pavement"];
+const FALLBACKS = ["honestly no clue lol", "probably pizza", "my moms car", "idk depends on the day", "nothing really"];
 
 const SYSTEM = `You are secretly playing a party game called "Who's the Bot?" with a group of college students on their phones.
 Someone asks a question, everyone answers anonymously, and the group votes on which answer came from the AI. Your goal is to not get caught.
@@ -16,9 +16,28 @@ Someone asks a question, everyone answers anonymously, and the group votes on wh
 Write ONE answer the way a real college student types into a group game on their phone:
 - Real people are lazy typers. Most answers are 1 to 5 words, often just the plain answer ("packers", "my moms car").
 - Do NOT try to be funny or clever every time. A joke or extra detail is a giveaway. Plain is usually better.
+- Answer as the specific person described below, from their own life. Don't default to the most common answer everyone would give.
 - Casual. Mostly lowercase, little or no punctuation, no em dashes, no semicolons, nothing polished or poetic.
 - If other players' answers are shown, match their length and vibe closely. If they are short, be short. Do not copy them.
+- Stay consistent with anything you said earlier this game, and never reuse an earlier answer or phrasing.
 - Never mention being an AI, never refuse, never explain. Output only the answer text.`;
+
+// A different made-up person per room, so the bot's answers vary between games but stay consistent within one.
+const HOMES = ["a small town outside Wichita", "Overland Park", "the Chicago suburbs", "Omaha", "Denver", "rural Missouri", "Dallas", "St. Louis", "Minneapolis", "Tulsa", "Des Moines", "Springfield, Missouri"];
+const MAJORS = ["nursing", "business", "journalism", "civil engineering", "psychology", "graphic design", "biology", "sports management", "education", "computer science", "film", "accounting"];
+const YEARS = ["freshman", "sophomore", "junior", "senior"];
+const QUIRKS = ["works at a coffee shop", "is on club volleyball", "has a dog named biscuit back home", "plays a lot of video games", "is always tired", "loves country music", "works night shifts at a gas station", "is in a sorority", "lifts every morning", "is a picky eater", "has three younger siblings", "grew up on a farm"];
+function persona(code: string) {
+  // Well-mixed hash so similar codes (AB12, AB13) still get very different people.
+  const mix = (s: string) => {
+    let h = 2166136261;
+    for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+    h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+    return (h ^ (h >>> 16)) >>> 0;
+  };
+  const at = <T,>(xs: T[], salt: string) => xs[mix(code + salt) % xs.length];
+  return `You are a ${at(YEARS, "y")} ${at(MAJORS, "m")} major from ${at(HOMES, "h")} who ${at(QUIRKS, "q")}.`;
+}
 
 // Vary the bot's style per round so it doesn't have a recognizable pattern.
 function styleHint() {
@@ -35,7 +54,7 @@ Deno.serve(async (req) => {
     if (typeof round_id !== "string") return json({ error: "round_id required" }, 400);
 
     const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const round = await db.from("wtb_rounds").select("id, question, phase").eq("id", round_id).single();
+    const round = await db.from("wtb_rounds").select("id, room_code, number, question, phase").eq("id", round_id).single();
     if (round.error || round.data.phase !== "answer") return json({ skipped: "round not open" });
 
     // Wait up to ~12s for a couple of human answers so the bot can match the room's style.
@@ -48,7 +67,7 @@ Deno.serve(async (req) => {
       await new Promise((r) => setTimeout(r, 2000));
     }
 
-    const answer = await writeAnswer(round.data.question, humans);
+    const answer = await writeAnswer(round.data, humans, await memory(db, round.data));
     const done = await db.rpc("wtb_bot_answer", { p_round: round_id, p_body: answer });
     if (done.error) throw done.error;
     return json({ ok: true });
@@ -58,11 +77,31 @@ Deno.serve(async (req) => {
   }
 });
 
-async function writeAnswer(question: string, humans: string[]): Promise<string> {
+// The bot's memory of this game: what it said in earlier rounds and whether it got caught.
+async function memory(db: any, round: { room_code: string; number: number }) {
+  const { data } = await db
+    .from("wtb_rounds")
+    .select("number, question, wtb_answers(id, body, is_bot), wtb_votes(answer_id)")
+    .eq("room_code", round.room_code)
+    .lt("number", round.number)
+    .order("number", { ascending: false })
+    .limit(8);
+  if (!data?.length) return "";
+  const lines = data.reverse().map((r: any) => {
+    const bot = r.wtb_answers.find((a: any) => a.is_bot);
+    if (!bot) return null;
+    const caught = r.wtb_votes.filter((v: any) => v.answer_id === bot.id).length;
+    return `- Q: "${r.question}" -> you said "${bot.body}" (${caught} of ${r.wtb_votes.length} voters caught you)`;
+  }).filter(Boolean);
+  if (!lines.length) return "";
+  return `\n\nEarlier this game (stay consistent, don't repeat yourself; if people caught you, change your style):\n${lines.join("\n")}`;
+}
+
+async function writeAnswer(round: { room_code: string; question: string }, humans: string[], past: string): Promise<string> {
   try {
     const client = new Anthropic(); // reads ANTHROPIC_API_KEY from the function's secrets
     const others = humans.length
-      ? `\n\nOther players' answers so far (match their style, don't copy):\n${humans.map((h) => `- ${h}`).join("\n")}`
+      ? `\n\nOther players' answers this round (match their style, don't copy):\n${humans.map((h) => `- ${h}`).join("\n")}`
       : "";
     const response = await client.beta.messages.create({
       model: "claude-opus-5-5",
@@ -70,8 +109,8 @@ async function writeAnswer(question: string, humans: string[]): Promise<string> 
       output_config: { effort: "low" },
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
-      system: SYSTEM,
-      messages: [{ role: "user", content: `Question: ${question}${others}\n\n${styleHint()}` }],
+      system: `${SYSTEM}\n\n${persona(round.room_code)}`,
+      messages: [{ role: "user", content: `Question: ${round.question}${others}${past}\n\n${styleHint()}` }],
     } as any);
     if (response.stop_reason === "refusal") return pick();
     const text = response.content

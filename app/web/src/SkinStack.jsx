@@ -1,6 +1,6 @@
 // Style D: "Stack". One thing at a time, big type, cards you flip through.
 import { useState } from "react";
-import { Icon, Avatar, SUGGESTIONS, clock, inviteLink } from "./ui.jsx";
+import { Icon, Avatar, useQuestions, clock, inviteLink } from "./ui.jsx";
 import { COLORS } from "./game.js";
 
 export default function SkinStack({ g, v }) {
@@ -107,6 +107,7 @@ function Lobby({ g, v }) {
 
 function Ask({ g, v }) {
   const [q, setQ] = useState("");
+  const deck = useQuestions(v.s.asked);
   const alone = v.s.players.length < 2;
   return (
     <>
@@ -116,7 +117,8 @@ function Ask({ g, v }) {
         <textarea value={q} maxLength={200} placeholder="Ask something only a human would get right…" onChange={(e) => setQ(e.target.value)} />
       </label>
       <div className="d-sugg">
-        {SUGGESTIONS.map((t) => <button key={t} className="d-pill" onClick={() => setQ(t)}>{t}</button>)}
+        <button className="d-pill d-shuffle" aria-label="New questions" onClick={deck.shuffle}><span key={deck.spin} className="spin">{Icon.shuffle(18)}</span></button>
+        {deck.qs.map((t, i) => <button key={t + deck.spin} className="d-pill" style={{ animationDelay: `${i * 50}ms` }} onClick={() => setQ(t)}>{t}</button>)}
       </div>
       <div className="d-fill" />
       <div className="d-foot">

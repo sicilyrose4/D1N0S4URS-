@@ -1,6 +1,6 @@
 // Style B: "Assistant". Monochrome, ChatGPT-like. The room "thinks" like a model.
 import { useState } from "react";
-import { Icon, Avatar, SUGGESTIONS, clock, inviteLink } from "./ui.jsx";
+import { Icon, Avatar, useQuestions, clock, inviteLink } from "./ui.jsx";
 
 export default function SkinAssistant({ g, v }) {
   const { r, screen } = v;
@@ -102,6 +102,7 @@ function Lobby({ v }) {
 
 function Ask({ g, v }) {
   const [q, setQ] = useState("");
+  const deck = useQuestions(v.s.asked);
   const alone = v.s.players.length < 2;
   const send = (e) => { e.preventDefault(); if (q.trim()) g.ask(q) };
   return (
@@ -110,14 +111,17 @@ function Ask({ g, v }) {
         <div className="b-orb glow">{Icon.people()}</div>
         <h2>What should the room answer?</h2>
         <p className="b-sub">
-          {alone ? "Invite at least one more person to start." : `${v.s.players.length - 1} people and 1 bot will answer. Ask something only a human would get right.`}
+          {alone ? "Invite at least one more person to start." : `${v.s.players.length - 1} ${v.s.players.length === 2 ? "person" : "people"} and 1 bot will answer. Ask something only a human would get right.`}
         </p>
         <Invite code={v.s.room} onQr={v.showQr} />
         <div className="b-chips">
-          {SUGGESTIONS.slice(0, 4).map((t) => (
-            <button key={t} className="b-chip" onClick={() => setQ(t)}>{t}</button>
+          {deck.qs.map((t, i) => (
+            <button key={t + deck.spin} className="b-chip" style={{ animationDelay: `${i * 50}ms` }} onClick={() => setQ(t)}>{t}</button>
           ))}
         </div>
+        <button className="b-shuffle" onClick={deck.shuffle}>
+          <span key={deck.spin} className="spin">{Icon.shuffle()}</span> New questions
+        </button>
       </main>
       <Composer value={q} onChange={setQ} onSubmit={send} placeholder="Ask the room anything" max={200} disabled={g.busy || alone} />
     </>
