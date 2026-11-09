@@ -1,6 +1,11 @@
-## The prototype I used to test can be found here: https://sicilyrose4.github.io/team-alarm/ 
+## The prototype I used to test can be found here: (https://claude.ai/artifact/AVyWuf59e2UNpBrXfcjGJt)
 I tested only the creation of the alarm and the action of turning it off and seeing the actions of the other users.
+
 It starts with prompting the user to input their name, simply so they would recognize each other in the live test (this would not be used in the real app).
+
+The user who typed their name first was prompted to create the alarm, and the others joined. Then, I prompted the creator to press a button to simulate 
+the alarm going off at the time they set. I let them go through the experience, taking note of what they said out loud as well as actions they took. For the most part clicking the right buttons seemed easy, seeing as it is a fairly simple interaction.
+
 
 ## Notes
 
