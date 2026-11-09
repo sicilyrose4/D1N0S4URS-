@@ -77,10 +77,15 @@ function PlayerChips({ v, done }) {
   );
 }
 
-function Invite({ code }) {
+function Invite({ code, onQr }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => { try { await navigator.clipboard.writeText(inviteLink(code)); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* ignore */ } };
-  return <button type="button" className="d-ghost" onClick={copy}>{Icon.link()} {copied ? "Link copied" : `Invite · ${code}`}</button>;
+  return (
+    <div className="d-invite-row">
+      <button type="button" className="d-ghost" onClick={copy}>{Icon.link()} {copied ? "Link copied" : `Invite · ${code}`}</button>
+      <button type="button" className="d-ghost" onClick={onQr}>{Icon.qr()} QR code</button>
+    </div>
+  );
 }
 
 const Leave = ({ g }) => <button className="d-icon" aria-label="Leave room" onClick={g.leave}>{Icon.out()}</button>;
@@ -95,7 +100,7 @@ function Lobby({ g, v }) {
         <PlayerChips v={v} />
       </div>
       <div className="d-fill" />
-      <div className="d-foot"><Invite code={v.s.room} /></div>
+      <div className="d-foot"><Invite code={v.s.room} onQr={v.showQr} /></div>
     </>
   );
 }
@@ -115,7 +120,7 @@ function Ask({ g, v }) {
       </div>
       <div className="d-fill" />
       <div className="d-foot">
-        {alone && <Invite code={v.s.room} />}
+        <Invite code={v.s.room} onQr={v.showQr} />
         <button className="d-cta" disabled={g.busy || alone || !q.trim()} onClick={() => g.ask(q)}>
           {alone ? "Waiting for one more person" : "Ask the room"}
         </button>

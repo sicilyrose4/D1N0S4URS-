@@ -77,13 +77,16 @@ function Players({ v }) {
   );
 }
 
-function Invite({ code }) {
+function Invite({ code, onQr }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => { try { await navigator.clipboard.writeText(inviteLink(code)); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* ignore */ } };
   return (
-    <button className="b-invite" onClick={copy}>
-      {Icon.link()} <span>{copied ? "Link copied" : <>Invite friends · <b>{code}</b></>}</span>
-    </button>
+    <div className="b-invite-row">
+      <button className="b-invite" onClick={copy}>
+        {Icon.link()} <span>{copied ? "Link copied" : <>Invite · <b>{code}</b></>}</span>
+      </button>
+      <button className="b-invite" onClick={onQr}>{Icon.qr()} <span>QR code</span></button>
+    </div>
   );
 }
 
@@ -92,7 +95,7 @@ function Lobby({ v }) {
     <main className="b-body b-mid">
       <span className="b-shim">Waiting for {v.nextName} to ask…</span>
       <Players v={v} />
-      <Invite code={v.s.room} />
+      <Invite code={v.s.room} onQr={v.showQr} />
     </main>
   );
 }
@@ -109,7 +112,7 @@ function Ask({ g, v }) {
         <p className="b-sub">
           {alone ? "Invite at least one more person to start." : `${v.s.players.length - 1} people and 1 bot will answer. Ask something only a human would get right.`}
         </p>
-        {alone && <Invite code={v.s.room} />}
+        <Invite code={v.s.room} onQr={v.showQr} />
         <div className="b-chips">
           {SUGGESTIONS.slice(0, 4).map((t) => (
             <button key={t} className="b-chip" onClick={() => setQ(t)}>{t}</button>

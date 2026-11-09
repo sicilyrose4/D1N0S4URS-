@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useGame, screenFor, nameOf } from "./game.js";
-import { useElapsed, haptic } from "./ui.jsx";
+import { useElapsed, haptic, QrSheet } from "./ui.jsx";
 import SkinAssistant from "./SkinAssistant.jsx";
 import SkinStack from "./SkinStack.jsx";
 
@@ -13,6 +13,7 @@ export default function App() {
   const params = new URLSearchParams(location.search);
   const [skin, setSkin] = useState(() => (SKINS[params.get("skin")] ? params.get("skin") : pref("wtb-skin", "b")));
   const [askOpen, setAskOpen] = useState(false);
+  const [qr, setQr] = useState(false);
   const [form, setForm] = useState({ code: (params.get("room") || "").toUpperCase(), name: pref("wtb-name", "") });
 
   const s = g.state, r = s?.round;
@@ -35,6 +36,7 @@ export default function App() {
     ranked: s ? [...s.players].sort((a, b) => b.score - a.score) : [],
     form, setForm,
     openAsk: () => setAskOpen(true),
+    showQr: () => setQr(true),
     submitJoin: async (e) => {
       e?.preventDefault();
       setPref("wtb-name", form.name.trim());
@@ -53,7 +55,8 @@ export default function App() {
         ))}
       </div>
       <C g={g} v={v} />
-      {g.error && <div className="toast" role="alert" onClick={() => g.setError("")}>{g.error}</div>}
+      {qr && s && <QrSheet code={s.room} onClose={() => setQr(false)} />}
+      {g.error &&<div className="toast" role="alert" onClick={() => g.setError("")}>{g.error}</div>}
     </div>
   );
 }

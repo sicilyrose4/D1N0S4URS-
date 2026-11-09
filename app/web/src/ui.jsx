@@ -1,6 +1,25 @@
 // Small pieces shared by both visual styles.
 import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 import { COLORS } from "./game.js";
+
+// Full-screen "scan to join" card for projecting in class.
+export function QrSheet({ code, onClose }) {
+  const [svg, setSvg] = useState("");
+  useEffect(() => { QRCode.toString(inviteLink(code), { type: "svg", margin: 1, color: { dark: "#0d0d0d", light: "#ffffff" } }).then(setSvg) }, [code]);
+  useEffect(() => { const k = (e) => e.key === "Escape" && onClose(); addEventListener("keydown", k); return () => removeEventListener("keydown", k) }, [onClose]);
+  return (
+    <div className="qr-sheet" role="dialog" aria-modal="true" aria-label="Scan to join" onClick={onClose}>
+      <div className="qr-card" onClick={(e) => e.stopPropagation()}>
+        <span className="qr-eyebrow">Scan to join</span>
+        <div className="qr-img" role="img" aria-label={`QR code for room ${code}`} dangerouslySetInnerHTML={{ __html: svg }} />
+        <span className="qr-code">{code}</span>
+        <span className="qr-url">{inviteLink(code).replace(/^https?:\/\//, "")}</span>
+        <button className="qr-close" onClick={onClose}>Done</button>
+      </div>
+    </div>
+  );
+}
 
 const P = { fill: "none", stroke: "currentColor", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
 export const Icon = {
@@ -13,6 +32,7 @@ export const Icon = {
   check: (s = 16) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="3" {...P}><path d="M5 12l5 5 9-10" /></svg>,
   clock: (s = 14) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>,
   out: (s = 18) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10" /></svg>,
+  qr: (s = 16) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><path d="M14 14h2v2h-2zM18 18h2v2h-2zM14 18h.01M18 14h2" /></svg>,
   link: (s = 16) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><path d="M10 14a4 4 0 006 0l3-3a4 4 0 00-6-6l-1 1M14 10a4 4 0 00-6 0l-3 3a4 4 0 006 6l1-1" /></svg>,
 };
 
