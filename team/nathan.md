@@ -10,7 +10,7 @@
 
 Check items off with `[x]`. Add a due date to every task.
 
-- [ ] Use & document 3 multiplayer things in `3 multiplayer notes/nathan.md` — due 2026-11-04
+- [x] Use & document 3 multiplayer things in `3 multiplayer notes/nathan.md` — due 2026-11-04
 - [ ] Interview 1 (30–60 min, recorded), notes posted to `interviews/` — due [date]
 - [ ] Interview 2 (30–60 min, recorded), notes posted to `interviews/` — due [date]
 - [ ] Interview 3 (30–60 min, recorded), notes posted to `interviews/` — due [date]
