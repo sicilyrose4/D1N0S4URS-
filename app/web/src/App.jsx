@@ -2,30 +2,31 @@ import { useEffect, useState } from "react";
 import { useGame, screenFor, nameOf } from "./game.js";
 import { useElapsed, haptic, QrSheet } from "./ui.jsx";
 import SkinAssistant from "./SkinAssistant.jsx";
-import SkinStack from "./SkinStack.jsx";
 
-const SKINS = { b: { name: "Assistant", C: SkinAssistant }, d: { name: "Stack", C: SkinStack } };
 const pref = (k, d) => { try { return localStorage.getItem(k) ?? d } catch { return d } };
 const setPref = (k, v) => { try { localStorage.setItem(k, v) } catch { /* private mode */ } };
 
 export default function App() {
   const g = useGame();
   const params = new URLSearchParams(location.search);
-  const [skin, setSkin] = useState(() => (SKINS[params.get("skin")] ? params.get("skin") : pref("wtb-skin", "b")));
   const [askOpen, setAskOpen] = useState(false);
   const [qr, setQr] = useState(false);
+  const [hold, setHold] = useState(true);
   const [form, setForm] = useState({ code: (params.get("room") || "").toUpperCase(), name: pref("wtb-name", "") });
 
   const s = g.state, r = s?.round;
-  const screen = screenFor(g, askOpen);
+  const real = screenFor(g, askOpen);
+  // Keep the loading scan up for a moment after joining so people actually see it.
+  const screen = hold && real !== "join" ? "loading" : real;
   const elapsed = useElapsed(r?.created_at);
 
-  useEffect(() => { setPref("wtb-skin", skin); document.documentElement.dataset.skin = skin }, [skin]);
+  useEffect(() => { setHold(true); const t = setTimeout(() => setHold(false), 2400); return () => clearTimeout(t) }, [g.session?.code]);
   useEffect(() => { if (r?.phase !== "reveal") setAskOpen(false); if (r?.phase === "reveal") haptic() }, [r?.phase, r?.id]);
 
+  const code = s?.room ?? g.session?.code;
   const typing = s ? Object.entries(g.online).filter(([id, v]) => v.typing && id !== s.me.id).length : 0;
   const v = {
-    s, r, screen, elapsed, typing,
+    s, r, screen, elapsed, typing, code,
     online: g.online,
     isAsker: r && s && r.asker_id === s.me.id,
     myTurn: s && s.next_asker === s.me.id,
@@ -46,17 +47,11 @@ export default function App() {
     },
   };
 
-  const { C } = SKINS[skin];
   return (
-    <div className={`app skin-${skin}`}>
-      <div className="skin-switch" role="group" aria-label="Visual style">
-        {Object.entries(SKINS).map(([k, { name }]) => (
-          <button key={k} aria-pressed={k === skin} onClick={() => setSkin(k)}>{name}</button>
-        ))}
-      </div>
-      <C g={g} v={v} />
-      {qr && s && <QrSheet code={s.room} onClose={() => setQr(false)} />}
-      {g.error &&<div className="toast" role="alert" onClick={() => g.setError("")}>{g.error}</div>}
+    <div className="app">
+      <SkinAssistant g={g} v={v} />
+      {qr && code && <QrSheet code={code} onClose={() => setQr(false)} />}
+      {g.error && <div className="toast" role="alert" onClick={() => g.setError("")}>{g.error}</div>}
     </div>
   );
 }

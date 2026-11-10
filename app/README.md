@@ -6,7 +6,7 @@ A live party game for 3 to 12 people on their phones. One person asks a question
 
 ## How it works
 
-- **`web/`**: the phone web app (Vite + React). It has two visual styles you can switch between at the top of the screen: **Assistant** (ChatGPT-like) and **Stack** (one big card at a time).
+- **`web/`**: the phone web app (Vite + React). It uses one ChatGPT-like visual style. A robot mascot (looping GIFs in `web/public/robot`) reacts to each moment: its antenna turns green when you catch the bot and red when the bot fools you.
 - **Supabase**: stores rooms, players, rounds, answers and votes. Every phone gets a realtime ping when something changes, and presence shows who is online and typing.
 - **`supabase/functions/bot-answer/`**: when a question is asked, this function waits for a couple of human answers, then asks Claude to write an answer in the same casual style and slips it in.
 - **`supabase/migrations/`**: the database tables and game rules.

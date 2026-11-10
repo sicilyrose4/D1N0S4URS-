@@ -63,6 +63,25 @@ export function useQuestions(asked) {
   return { qs, spin, shuffle: () => { setQs(pickQuestions(asked)); setSpin((n) => n + 1) } };
 }
 
-export const inviteLink = (code) => `${location.origin}${location.pathname}?room=${code}`;
+// The logo robot. Moods are looping GIFs in public/robot: the antenna bulb is green for human/correct, red for bot/wrong.
+export const Robot = ({ mood = "idle", size = 64, className = "" }) => (
+  <img className={"robot " + className} src={`${import.meta.env.BASE_URL}robot/${mood}.gif`} width={size} height={size} alt="" />
+);
+
+const LINES = [
+  "Teaching the bot to type badly…", "Hiding a robot among your friends…", "Practicing lowercase…",
+  "Forgetting how punctuation works…", "Picking a favorite sports team…", "Inventing a hometown…",
+  "Misspelling things on purpose…", "Pretending to be a sophomore…", "Deleting every em dash…", "Acting natural…",
+  "Warming up the antenna…", "Learning what \"mid\" means…", "Rehearsing \"idk lol\"…", "Shuffling the humans…",
+  "Downloading a personality…", "Charging social battery…", "Googling how college kids text…", "Removing the word \"delve\"…",
+];
+// A fun loading line that changes every couple of seconds, never the same twice in a row.
+export function useLoadingLine(ms = 2200) {
+  const [i, setI] = useState(() => Math.floor(Math.random() * LINES.length));
+  useEffect(() => { const t = setInterval(() => setI((x) => (x + 1 + Math.floor(Math.random() * (LINES.length - 1))) % LINES.length), ms); return () => clearInterval(t) }, [ms]);
+  return LINES[i];
+}
+
+export const inviteLink =(code) => `${location.origin}${location.pathname}?room=${code}`;
 
 export function haptic() { try { navigator.vibrate?.(30) } catch { /* not supported */ } }

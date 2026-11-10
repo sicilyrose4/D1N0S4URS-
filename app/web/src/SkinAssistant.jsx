@@ -1,16 +1,16 @@
 // Style B: "Assistant". Monochrome, ChatGPT-like. The room "thinks" like a model.
 import { useState } from "react";
-import { Icon, Avatar, useQuestions, clock, inviteLink } from "./ui.jsx";
+import { Icon, Avatar, Robot, useQuestions, useLoadingLine, clock, inviteLink } from "./ui.jsx";
 
 export default function SkinAssistant({ g, v }) {
   const { r, screen } = v;
   if (screen === "join") return <Join g={g} v={v} />;
-  if (screen === "loading") return <div className="b-screen b-center"><span className="b-shim">Loading room…</span></div>;
+  if (screen === "loading") return <div className="b-screen"><Scan v={v} loading /><InviteFoot v={v} /></div>;
 
   return (
     <div className="b-screen">
       <Top g={g} v={v} />
-      {screen === "lobby" && <Lobby v={v} />}
+      {screen === "lobby" && <><Scan v={v} /><InviteFoot v={v} /></>}
       {screen === "ask" && <Ask g={g} v={v} />}
       {screen === "answer" && <Answer g={g} v={v} />}
       {screen === "waiting" && <Waiting g={g} v={v} />}
@@ -27,10 +27,10 @@ function Top({ g, v }) {
       <div className="b-title">
         {r && r.phase !== "reveal" ? <>Round {r.number}</> : <>Room {s.room}</>}
       </div>
-      <div className="b-faces" aria-label={`${s.players.length} players`}>
+      <button className="b-faces" aria-label={`${s.players.length} players. Show invite QR code`} onClick={v.showQr}>
         {s.players.slice(0, 3).map((p) => <Avatar key={p.id} p={p} size={24} online={!!v.online[p.id]} />)}
         {s.players.length > 3 && <span className="av more">+{s.players.length - 3}</span>}
-      </div>
+      </button>
     </header>
   );
 }
@@ -40,7 +40,7 @@ function Join({ g, v }) {
   return (
     <form className="b-screen b-join" onSubmit={v.submitJoin}>
       <div className="b-hero">
-        <div className="b-orb">{Icon.people()}</div>
+        <Robot mood="idle" size={80} />
         <h1>Who's the Bot?</h1>
         <p>Everyone answers. One answer is secretly AI. Find it.</p>
       </div>
@@ -63,20 +63,6 @@ function Join({ g, v }) {
   );
 }
 
-function Players({ v }) {
-  return (
-    <ul className="b-players">
-      {v.s.players.map((p) => (
-        <li key={p.id}>
-          <Avatar p={p} size={28} online={!!v.online[p.id]} />
-          <span>{p.name}{p.id === v.s.me.id && <em> (you)</em>}</span>
-          {p.score > 0 && <b>{p.score}</b>}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function Invite({ code, onQr }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => { try { await navigator.clipboard.writeText(inviteLink(code)); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* ignore */ } };
@@ -90,15 +76,41 @@ function Invite({ code, onQr }) {
   );
 }
 
-function Lobby({ v }) {
+// Loading and lobby: the robot hops along the players and checks each one off as human.
+function Scan({ v, loading }) {
+  const line = useLoadingLine();
+  const people = v.s?.players ?? [];
+  const faces = people.slice(0, 6);
+  while (faces.length < 4) faces.push(null); // empty seats, so the scan has room to move
+  const pass = faces.length * 0.7;
   return (
     <main className="b-body b-mid">
-      <span className="b-shim">Waiting for {v.nextName} to ask…</span>
-      <Players v={v} />
-      <Invite code={v.s.room} onQr={v.showQr} />
+      <div className="b-scan" style={{ "--pass": `${pass}s` }}>
+        <Robot mood="deciding" size={48} className="b-scanner" />
+        {faces.map((p, i) => (
+          <span key={p?.id ?? i} className={"b-face" + (p ? "" : " empty")} style={{ "--d": `${(i * pass) / faces.length}s` }}>
+            {p ? <Avatar p={p} size={40} /> : <span className="av ghost" />}
+            {p && <small>{p.id === v.s.me.id ? "You" : p.name}</small>}
+          </span>
+        ))}
+        {people.length > 6 && <span className="b-face more"><span className="av more">+{people.length - 6}</span></span>}
+      </div>
+      {loading ? (
+        <>
+          <h2>Checking who's human…</h2>
+          <p className="b-sub b-line" key={line}>{line}</p>
+        </>
+      ) : (
+        <>
+          <h2>Waiting for {v.nextName} to ask…</h2>
+          <p className="b-sub">{people.length} {people.length === 1 ? "human" : "humans"} found. 1 imposter incoming.</p>
+        </>
+      )}
     </main>
   );
 }
+
+const InviteFoot = ({ v }) => <footer className="b-foot">{v.code && <Invite code={v.code} onQr={v.showQr} />}</footer>;
 
 function Ask({ g, v }) {
   const [q, setQ] = useState("");
@@ -108,7 +120,7 @@ function Ask({ g, v }) {
   return (
     <>
       <main className="b-body b-mid">
-        <div className="b-orb glow">{Icon.people()}</div>
+        <Robot mood="idle" size={64} />
         <h2>What should the room answer?</h2>
         <p className="b-sub">
           {alone ? "Invite at least one more person to start." : `${v.s.players.length - 1} ${v.s.players.length === 2 ? "person" : "people"} and 1 bot will answer. Ask something only a human would get right.`}
@@ -164,9 +176,10 @@ function Waiting({ g, v }) {
     <>
       <main className="b-body">
         <div className="b-q">{r.question}</div>
-        <span className="b-shim">
-          {r.answered >= total ? "Shuffling answers…" : `${total - r.answered} still writing…`}
-        </span>
+        <div className="b-row">
+          <Robot mood="typing" size={40} />
+          <span className="b-shim">{r.answered >= total ? "Shuffling answers…" : `${total - r.answered} still writing…`}</span>
+        </div>
         <div className="b-skel">
           {Array.from({ length: total }, (_, i) => (
             <div key={i} className={"b-skel-row" + (i < r.answered ? " done" : "")}>
@@ -192,13 +205,13 @@ function Judge({ g, v }) {
       <main className="b-body">
         {reveal ? (
           <div className="b-reveal">
-            <div className="b-botbadge">{Icon.bot(28)}</div>
+            <Robot mood={v.gotIt ? "caught" : r.my_vote ? "fooled" : "busted"} size={88} />
             <h2>{v.bot ? `${v.bot.label} was the bot` : "Round over"}</h2>
-            <p className="b-sub">{v.gotIt ? "You caught it. +2" : r.my_vote ? "It fooled you." : `${v.askerName} asked: ${r.question}`}</p>
+            <p className={"b-sub" + (v.gotIt ? " win" : r.my_vote ? " lose" : "")}>{v.gotIt ? "You caught it. +2" : r.my_vote ? "It fooled you." : `${v.askerName} asked: ${r.question}`}</p>
           </div>
         ) : (
           <>
-            <div className="b-asked">Which one is the bot?</div>
+            <div className="b-row"><Robot mood="suspicious" size={40} /><div className="b-asked">Which one is the bot?</div></div>
             <div className="b-q small">{r.question}</div>
           </>
         )}
@@ -206,7 +219,7 @@ function Judge({ g, v }) {
           {s.answers.map((a, i) => {
             const picked = r.my_vote === a.id;
             return (
-              <button key={a.id} className={"b-opt" + (picked ? " picked" : "") + (reveal && a.is_bot ? " bot" : "") + (reveal && !a.is_bot ? " dim" : "")}
+              <button key={a.id} className={"b-opt" + (picked ? " picked" : "") + (reveal && a.is_bot ? " bot" : "") + (reveal && !a.is_bot ? " dim" : "") + (reveal && picked ? (a.is_bot ? " right" : " wrong") : "")}
                 style={{ animationDelay: `${i * 70}ms` }} disabled={reveal || a.mine || g.busy} onClick={() => g.vote(a.id)}>
                 <span className="b-radio" />
                 <span className="b-opt-body">
@@ -214,7 +227,7 @@ function Judge({ g, v }) {
                   {a.mine && !reveal && <em>Your answer</em>}
                   {reveal && (
                     <em className="b-who">
-                      {a.is_bot ? <>{Icon.bot(12)} Bot</> : a.author} · {a.votes} {a.votes === 1 ? "vote" : "votes"}
+                      {a.is_bot ? <><Robot mood="busted" size={18} /> Bot</> : a.author} · {a.votes} {a.votes === 1 ? "vote" : "votes"}
                     </em>
                   )}
                 </span>
