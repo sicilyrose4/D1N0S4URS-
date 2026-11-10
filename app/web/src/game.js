@@ -34,7 +34,9 @@ export function useGame() {
   const refresh = useCallback(async () => {
     if (!session) return;
     try {
-      setState(await rpc("wtb_state", { p_token: session.token }));
+      const st = await rpc("wtb_state", { p_token: session.token });
+      st.skew = Date.parse(st.now) - Date.now(); // phone clock vs server clock, for the countdown
+      setState(st);
     } catch (e) {
       if (/not found/i.test(e.message)) { save(null); setSession(null); setState(null) }
     }
@@ -80,10 +82,13 @@ export function useGame() {
   });
   const vote = run((id) => rpc("wtb_vote", { p_token: session.token, p_answer: id }));
   const force = run(() => rpc("wtb_force", { p_token: session.token }));
+  const start = run(() => rpc("wtb_start", { p_token: session.token }));
+  // Countdown hit zero: the server closes answering if the deadline really passed.
+  const tick = () => rpc("wtb_tick", { p_token: session.token }).then(refresh).catch(() => {});
   const setTyping = (typing) => chan.current?.track({ typing });
   const leave = () => { save(null); setSession(null); setState(null) };
 
-  return { session, state, online, error, setError, busy, join, newCode, ask, answer, vote, force, setTyping, leave };
+  return { session, state, online, error, setError, busy, join, newCode, ask, answer, vote, force, start, tick, setTyping, leave };
 }
 
 // Which screen to show, shared by every visual style.
@@ -91,6 +96,7 @@ export function screenFor(g, askOpen) {
   if (!g.session) return "join";
   const s = g.state;
   if (!s) return "loading";
+  if (!s.started) return "lobby"; // waiting room until the host taps Go
   const r = s.round;
   const myTurn = s.next_asker === s.me.id;
   if (!r || (r.phase === "reveal" && askOpen && myTurn)) return myTurn ? "ask" : "lobby";

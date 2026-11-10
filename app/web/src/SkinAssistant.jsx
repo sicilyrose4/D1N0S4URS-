@@ -1,16 +1,16 @@
 // Style B: "Assistant". Monochrome, ChatGPT-like. The room "thinks" like a model.
-import { useState } from "react";
-import { Icon, Avatar, Robot, useQuestions, useLoadingLine, clock, inviteLink } from "./ui.jsx";
+import { useEffect, useState } from "react";
+import { Icon, Avatar, Robot, useQuestions, useLoadingLine, inviteLink } from "./ui.jsx";
 
 export default function SkinAssistant({ g, v }) {
   const { r, screen } = v;
   if (screen === "join") return <Join g={g} v={v} />;
-  if (screen === "loading") return <div className="b-screen"><Scan v={v} loading /><InviteFoot v={v} /></div>;
+  if (screen === "loading") return <div className="b-screen"><Scan v={v} loading /><LobbyFoot g={g} v={v} /></div>;
 
   return (
     <div className="b-screen">
       <Top g={g} v={v} />
-      {screen === "lobby" && <><Scan v={v} /><InviteFoot v={v} /></>}
+      {screen === "lobby" && <><Scan v={v} /><LobbyFoot g={g} v={v} /></>}
       {screen === "ask" && <Ask g={g} v={v} />}
       {screen === "answer" && <Answer g={g} v={v} />}
       {screen === "waiting" && <Waiting g={g} v={v} />}
@@ -27,10 +27,13 @@ function Top({ g, v }) {
       <div className="b-title">
         {r && r.phase !== "reveal" ? <>Round {r.number}</> : <>Room {s.room}</>}
       </div>
+      <div className="b-row">
+      <button className="b-ib" aria-label={v.soundOn ? "Turn music off" : "Turn music on"} onClick={v.toggleSound}>{v.soundOn ? Icon.sound() : Icon.mute()}</button>
       <button className="b-faces" aria-label={`${s.players.length} players. Show invite QR code`} onClick={v.showQr}>
         {s.players.slice(0, 3).map((p) => <Avatar key={p.id} p={p} size={24} online={!!v.online[p.id]} />)}
         {s.players.length > 3 && <span className="av more">+{s.players.length - 3}</span>}
       </button>
+      </div>
     </header>
   );
 }
@@ -83,12 +86,13 @@ function Scan({ v, loading }) {
   const faces = people.slice(0, 6);
   while (faces.length < 4) faces.push(null); // empty seats, so the scan has room to move
   const pass = faces.length * 0.7;
+  const hostName = people.find((p) => p.id === v.s?.host_id)?.name ?? "the host";
   return (
     <main className="b-body b-mid">
       <div className="b-scan" style={{ "--pass": `${pass}s` }}>
         <Robot mood="deciding" size={48} className="b-scanner" />
         {faces.map((p, i) => (
-          <span key={p?.id ?? i} className={"b-face" + (p ? "" : " empty")} style={{ "--d": `${(i * pass) / faces.length}s` }}>
+          <span key={p?.id ?? i} className={"b-face" + (p ? "" : " empty")} style={{ "--d": `${i * 0.12}s` }}>
             {p ? <Avatar p={p} size={40} /> : <span className="av ghost" />}
             {p && <small>{p.id === v.s.me.id ? "You" : p.name}</small>}
           </span>
@@ -102,7 +106,7 @@ function Scan({ v, loading }) {
         </>
       ) : (
         <>
-          <h2>Waiting for {v.nextName} to ask…</h2>
+          <h2>{!v.s.started ? (v.isHost ? "Everyone in?" : `Waiting for ${hostName} to start…`) : `Waiting for ${v.nextName} to ask…`}</h2>
           <p className="b-sub">{people.length} {people.length === 1 ? "human" : "humans"} found. 1 imposter incoming.</p>
         </>
       )}
@@ -110,7 +114,64 @@ function Scan({ v, loading }) {
   );
 }
 
-const InviteFoot = ({ v }) => <footer className="b-foot">{v.code && <Invite code={v.code} onQr={v.showQr} />}</footer>;
+// Waiting room footer: the host's Go button, and the invite code + QR for everyone.
+function LobbyFoot({ g, v }) {
+  const n = v.s?.players.length ?? 0;
+  return (
+    <footer className="b-foot">
+      {v.s && !v.s.started && v.isHost && v.screen === "lobby" && (
+        <button className="b-cta b-go-big" disabled={g.busy || n < 2} onClick={g.start}>{n < 2 ? "Waiting for one more person" : "Go"}</button>
+      )}
+      {v.code && <Invite code={v.code} onQr={v.showQr} />}
+    </footer>
+  );
+}
+
+// Shrinking 30 second bar. Turns red for the last 10.
+function Timer({ v }) {
+  const left = Math.max(0, v.left ?? 0);
+  return (
+    <div className={"b-timer" + (left <= 10 ? " hot" : "") + (left <= 5 ? " panic" : "")} role="timer" aria-label={`${left} seconds left`}>
+      <span className="b-track"><span className="b-fill" style={{ transform: `scaleX(${Math.min(1, left / 30)})` }} /></span>
+      <b>{left}</b>
+    </div>
+  );
+}
+
+// Everyone's face while answering: typing bubble, or a check once they've sent. The bot plays along.
+function Crowd({ v }) {
+  const { r, s } = v;
+  const done = new Set(r.answered_ids);
+  const status = (p) => (done.has(p.id) ? "done" : v.online[p.id]?.typing ? "typing" : v.online[p.id] ? "idle" : "away");
+  return (
+    <ul className="b-crowd" aria-label="Who has answered">
+      {s.players.filter((p) => p.id !== r.asker_id).map((p) => (
+        <Seat key={p.id} st={status(p)} name={p.id === s.me.id ? "You" : p.name}><Avatar p={p} size={44} /></Seat>
+      ))}
+      <Seat st={r.bot_answered ? "done" : "typing"} name="Bot"><Robot mood="idle" size={44} /></Seat>
+    </ul>
+  );
+}
+const Seat = ({ st, name, children }) => (
+  <li className={"b-seat " + st}>
+    {st === "typing" && <span className="b-bubble" aria-label="typing"><i /><i /><i /></span>}
+    {children}
+    {st === "done" && <span className="b-tick" aria-label="answered">{Icon.check(10)}</span>}
+    <small>{name}</small>
+  </li>
+);
+
+// Answer text that flickers through random letters while the answers are being mixed.
+const GLYPHS = "abcdefghijklmnopqrstuvwxyz#%&?!";
+function Scramble({ text, on }) {
+  const [t, setT] = useState(text);
+  useEffect(() => {
+    if (!on) return;
+    const id = setInterval(() => setT(text.replace(/\S/g, () => GLYPHS[(Math.random() * GLYPHS.length) | 0])), 70);
+    return () => clearInterval(id);
+  }, [text, on]);
+  return on ? t : text;
+}
 
 function Ask({ g, v }) {
   const [q, setQ] = useState("");
@@ -156,11 +217,13 @@ function Answer({ g, v }) {
   const [a, setA] = useState("");
   return (
     <>
+      <Timer v={v} />
       <main className="b-body">
         <div className="b-asked">{v.askerName} asks</div>
         <div className="b-q">{v.r.question}</div>
         <p className="b-hint">Answer like yourself. The bot is trying to sound like everyone.</p>
-        {v.typing > 0 && <span className="b-shim">{v.typing} {v.typing === 1 ? "person is" : "people are"} writing…</span>}
+        <Crowd v={v} />
+        {v.isHost && <button className="b-ghost b-skip" onClick={g.force} disabled={g.busy}>Skip to voting</button>}
       </main>
       <Composer value={a} onChange={setA} onSubmit={(e) => { e.preventDefault(); if (a.trim()) g.answer(a) }}
         placeholder="Your answer, anonymous" max={160} disabled={g.busy}
@@ -171,27 +234,18 @@ function Answer({ g, v }) {
 
 function Waiting({ g, v }) {
   const { r } = v;
-  const total = r.expected_answers;
+  const waiting = r.expected_answers - r.answered;
   return (
     <>
+      <Timer v={v} />
       <main className="b-body">
         <div className="b-q">{r.question}</div>
-        <div className="b-row">
-          <Robot mood="typing" size={40} />
-          <span className="b-shim">{r.answered >= total ? "Shuffling answers…" : `${total - r.answered} still writing…`}</span>
-        </div>
-        <div className="b-skel">
-          {Array.from({ length: total }, (_, i) => (
-            <div key={i} className={"b-skel-row" + (i < r.answered ? " done" : "")}>
-              <span className="b-dot">{i < r.answered ? Icon.check(12) : ""}</span>
-              <span className="b-bar" style={{ width: `${40 + ((i * 37) % 50)}%` }} />
-            </div>
-          ))}
-        </div>
+        <span className="b-shim">{waiting <= 0 ? "Mixing up the answers…" : `${waiting} still writing…`}</span>
+        <Crowd v={v} />
       </main>
       <footer className="b-foot">
-        <span className="b-pill">{Icon.clock()} {clock(v.elapsed)} · answers reveal together</span>
-        {v.isAsker && v.elapsed > 45 && <button className="b-ghost" onClick={g.force}>Skip ahead</button>}
+        <span className="b-pill">Answers reveal together, in random order</span>
+        {v.isHost && <button className="b-cta" onClick={g.force} disabled={g.busy}>Skip to voting</button>}
       </footer>
     </>
   );
@@ -200,6 +254,8 @@ function Waiting({ g, v }) {
 function Judge({ g, v }) {
   const { s, r } = v;
   const reveal = r.phase === "reveal";
+  const [mixing, setMixing] = useState(!reveal);
+  useEffect(() => { if (!mixing) return; const t = setTimeout(() => setMixing(false), 1800); return () => clearTimeout(t) }, [mixing]);
   return (
     <>
       <main className="b-body">
@@ -211,7 +267,7 @@ function Judge({ g, v }) {
           </div>
         ) : (
           <>
-            <div className="b-row"><Robot mood="suspicious" size={40} /><div className="b-asked">Which one is the bot?</div></div>
+            <div className="b-row"><Robot mood={mixing ? "deciding" : "suspicious"} size={40} /><div className="b-asked">{mixing ? "Mixing up the answers…" : "Which one is the bot?"}</div></div>
             <div className="b-q small">{r.question}</div>
           </>
         )}
@@ -219,12 +275,13 @@ function Judge({ g, v }) {
           {s.answers.map((a, i) => {
             const picked = r.my_vote === a.id;
             return (
-              <button key={a.id} className={"b-opt" + (picked ? " picked" : "") + (reveal && a.is_bot ? " bot" : "") + (reveal && !a.is_bot ? " dim" : "") + (reveal && picked ? (a.is_bot ? " right" : " wrong") : "")}
-                style={{ animationDelay: `${i * 70}ms` }} disabled={reveal || a.mine || g.busy} onClick={() => g.vote(a.id)}>
+              <button key={a.id} className={"b-opt" + (picked ? " picked" : "") + (reveal && a.is_bot ? " bot" : "") + (reveal && !a.is_bot ? " dim" : "") + (reveal && picked ? (a.is_bot ? " right" : " wrong") : "") + (mixing ? " mix" : "")}
+                style={{ animationDelay: `${i * 70}ms`, "--y": `${(((i * 3) % 5) - 2) * 34 || 30}px`, "--r": `${i % 2 ? 2 : -2}deg` }}
+                disabled={reveal || a.mine || g.busy || mixing} onClick={() => g.vote(a.id)}>
                 <span className="b-radio" />
                 <span className="b-opt-body">
-                  <span><b>{a.label}</b> · {a.body}</span>
-                  {a.mine && !reveal && <em>Your answer</em>}
+                  <span><b>{mixing ? "?" : a.label}</b> · <Scramble text={a.body} on={mixing} /></span>
+                  {a.mine && !reveal && !mixing && <em>Your answer</em>}
                   {reveal && (
                     <em className="b-who">
                       {a.is_bot ? <><Robot mood="busted" size={18} /> Bot</> : a.author} · {a.votes} {a.votes === 1 ? "vote" : "votes"}
@@ -246,7 +303,7 @@ function Judge({ g, v }) {
         ) : (
           <>
             <span className="b-pill">{r.voted} of {r.expected_votes} voted{r.my_vote ? " · tap another to change" : ""}</span>
-            {v.isAsker && <button className="b-ghost" onClick={g.force}>Reveal now</button>}
+            {v.isHost && !mixing && <button className="b-ghost" onClick={g.force}>Reveal now</button>}
           </>
         )}
       </footer>

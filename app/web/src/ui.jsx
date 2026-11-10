@@ -31,10 +31,11 @@ export const Icon = {
   left: (s = 20) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2.5" {...P}><path d="M15 6l-6 6 6 6" /></svg>,
   right: (s = 20) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2.5" {...P}><path d="M9 6l6 6-6 6" /></svg>,
   check: (s = 16) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="3" {...P}><path d="M5 12l5 5 9-10" /></svg>,
-  clock: (s = 14) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>,
   out: (s = 18) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10" /></svg>,
   shuffle: (s = 16) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5" /></svg>,
   qr: (s = 16) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><path d="M14 14h2v2h-2zM18 18h2v2h-2zM14 18h.01M18 14h2" /></svg>,
+  sound: (s = 18) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><path d="M4 9h4l5-4v14l-5-4H4zM16.5 8.5a5 5 0 010 7M19 6a8.5 8.5 0 010 12" /></svg>,
+  mute: (s = 18) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><path d="M4 9h4l5-4v14l-5-4H4zM17 9l5 6M22 9l-5 6" /></svg>,
   link: (s = 16) => <svg width={s} height={s} viewBox="0 0 24 24" strokeWidth="2" {...P}><path d="M10 14a4 4 0 006 0l3-3a4 4 0 00-6-6l-1 1M14 10a4 4 0 00-6 0l-3 3a4 4 0 006 6l1-1" /></svg>,
 };
 
@@ -48,13 +49,12 @@ export const Avatar = ({ p, size = 30, online, ring }) => (
   </span>
 );
 
-// Seconds since an ISO time, ticking every second.
-export function useElapsed(iso) {
+// Whole seconds until a server deadline, corrected for the phone's clock being off.
+export function useSecondsLeft(deadline, skew = 0) {
   const [now, setNow] = useState(Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, []);
-  return iso ? Math.max(0, Math.floor((now - new Date(iso).getTime()) / 1000)) : 0;
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 250); return () => clearInterval(t) }, []);
+  return deadline ? Math.ceil((Date.parse(deadline) - (now + skew)) / 1000) : null;
 }
-export const clock = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
 // 4 fresh suggestions from the catalog, skipping ones this room already asked. shuffle() deals a new hand.
 export function useQuestions(asked) {
