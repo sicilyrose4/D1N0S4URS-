@@ -31,7 +31,12 @@ export default function App() {
   // Tense music while people are answering.
   useEffect(() => { if (screen !== "loading" && r?.phase === "answer" && soundOn) music.play(() => leftRef.current ?? 30); else music.stop(); return music.stop }, [r?.phase, r?.id, soundOn, screen]);
   // Phones only allow audio after a tap.
-  useEffect(() => { addEventListener("pointerdown", music.unlock); return () => removeEventListener("pointerdown", music.unlock) }, []);
+  // iPhones only count touchend/click as a real tap for audio, so listen to all of them.
+  useEffect(() => {
+    const evs = ["pointerdown", "touchend", "click", "keydown"];
+    evs.forEach((e) => addEventListener(e, music.unlock));
+    return () => evs.forEach((e) => removeEventListener(e, music.unlock));
+  }, []);
 
   useEffect(() => { setHold(true); const t = setTimeout(() => setHold(false), 2400); return () => clearTimeout(t) }, [g.session?.code]);
   useEffect(() => { if (r?.phase !== "reveal") setAskOpen(false); if (r?.phase === "reveal") haptic() }, [r?.phase, r?.id]);
