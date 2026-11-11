@@ -7,21 +7,6 @@
 ## Sicily
 We might design for young adults, but not quite sure how small that age range will be yet. Based on my first interviews, they might be busy college students or young adults who are busy and in committed pre-professional and college programs whose days are packed with school, work and other responsibilities. They might be surrounded by people all day but have little time or energy for real connection, and the groups they depend on (group project teams, cohorts, roommates) might fall apart over timing and follow-through.
 
-## What this is
-
-[One or two sentences, in plain language: what are we making, and for whom?]
-
-## The problem
-
-[What problem or question are we exploring? Why does it matter to the people we're talking to?]
-
-## Who we're talking to
-
-[Describe the people you're reaching and interviewing.]
-
-## Where we are right now
-
-[What's the current state of the project? What are we testing this week?]
 
 ## Team
 
