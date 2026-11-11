@@ -6,5 +6,3 @@ Scan the QR code to open it on your phone:
 
 ![QR code](team-alarm-qr.png)
 
-- `team-alarm-qr.png` for screens and slides
-- `team-alarm-qr.svg` for printing at any size
