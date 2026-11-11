@@ -4,5 +4,5 @@ Live link: https://sicilyrose4.github.io/team-alarm-tasks/
 
 Scan the QR code to open it on your phone:
 
-![QR code](team-alarm-qr.png)
+<img src="team-alarm-qr.png" alt="QR code" width="280">
 
