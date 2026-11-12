@@ -23,3 +23,4 @@ We might design for young adults, but not quite sure how small that age range wi
 - `interviews/` — one file per interview, rough notes are fine
 - `team/` — one file per team member: role, to-do list, current work, notes
 - `3 multiplayer notes/` — each person's log of 3 multiplayer things and what signaled other people were there
+- `team-alarm-risks.md` — risks, edge cases and guardrails for the team alarm idea (alarm rings until everyone is up)
