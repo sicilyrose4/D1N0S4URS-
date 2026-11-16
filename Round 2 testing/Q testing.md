@@ -91,3 +91,26 @@
 - done
 
 - yea i really liked it. it was super easy to use and i really liked the design. i cold see myself using this with my teamates to make sure we all wake up on time.
+
+<br>
+<br>
+<br>
+
+---
+
+## Takeaways
+
+- **Everyone liked how it looks.** All five testers brought up the visuals on their own: the 3D clock, the dark look, the colors and fonts, and how everything moves. Emma kept spinning the phone around just because it was fun.
+- **The flashlight wake-up is the standout feature.** Gracie, Emma, Lauren and Jason all flashed other people's phones, and Emma kept spamming it. Emma said it solves a real problem: "sometimes people be on dnd."
+- **Setup is easy to get through.** Everyone made it through name, role, team and time without help. Gracie said it was "pretty straight forward," and Jason called it "super easy to use."
+- **The biggest problem is what happens after you set the alarm.** Gracie stared and was confused after clicking demo. Lauren didn't know whether to tap something or just wait. Ben stared at the screen until he asked what to do, and said everything "was done for me." 3 of 5 testers got stuck here.
+- **The order of steps wasn't always clear.** Gracie said it "took a bit to figure out what order i was supposed to be doing things in."
+- **Picking a time is easy to get wrong.** Gracie set the time too far away, and Lauren set it too close to now, so the time and date picker could use better defaults or a warning.
+- **Testers see it as a team tool.** Jason said he could see himself using it with teammates to make sure everyone wakes up on time, which fits the idea behind the app.
+- **Compared to round 1, navigation is much better.** In round 1, almost everyone got lost. This time nobody got lost on the way through, and the confusion moved to the waiting part after setup.
+
+### What to change next
+1. Add a clear "what happens now" screen or message after the alarm is set, for example "You're all set — we'll wake you at 6:00."
+2. Make the demo explain itself: tell people they can tap a teammate's name to flash their phone.
+3. Show progress during setup (for example "Step 2 of 4") so the order is obvious.
+4. Give the time picker a sensible default and warn when the alarm is very soon or very far away.
