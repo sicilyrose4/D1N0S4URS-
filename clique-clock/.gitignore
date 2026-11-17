@@ -1,0 +1,5 @@
+build/
+xcuserdata/
+*.xcarchive
+*.usdz
+.DS_Store
