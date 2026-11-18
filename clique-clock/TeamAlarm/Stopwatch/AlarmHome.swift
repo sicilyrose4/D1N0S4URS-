@@ -1,59 +1,33 @@
 import SwiftUI
-import RealityKit
-import CoreMotion
 import AVFoundation
 
-/// Phone tilt as a small lean target. The rest pose drifts back to however you hold the phone,
-/// so only a fresh tilt moves things, like a heavy object settling. Simulator: no motion, stays zero.
-@MainActor final class PhoneTilt {
-    static let shared = PhoneTilt()
-    private let motion = CMMotionManager()
-    private var rest: SIMD2<Float>?
-    private init() {
-        guard motion.isDeviceMotionAvailable else { return }
-        motion.deviceMotionUpdateInterval = 1 / 60
-        motion.startDeviceMotionUpdates()
-    }
-    /// Lean (yaw, pitch) in radians for this frame.
-    func lean(_ dt: Float) -> SIMD2<Float> {
-        guard let g = motion.deviceMotion?.gravity else { return .zero }
-        let now = SIMD2<Float>(Float(g.x), Float(g.z))
-        let r = rest ?? now
-        rest = r + (now - r) * min(1, dt * 0.35)     // slow re-centre
-        let d = now - r
-        return simd_clamp(SIMD2(d.x * 0.55, -d.y * 0.45), SIMD2(repeating: -0.22), SIMD2(repeating: 0.22))
-    }
-}
-
-// The alarm home screen: the 3D basalt stopwatch. It is the whole app now, no tab bar.
-// Teams and Settings open as sheets from the top corners.
+// The alarm home screen, 2D. A dial at the top where teammates land as they wake,
+// the big time, then one status bar per teammate. When the alarm rings, the full-screen
+// WAKE UP takes over; tap anywhere to stop it. Teams and Settings open as sheets from the top corners.
 
 struct Mate: Identifiable {
     let id: String
     let initials: String
     let name: String
-    let wakeAt: Double?          // nil = you, woken by the slider
+    let wakeAt: Double?          // nil = you, woken by tapping the wake-up screen
     var snoozeAt: Double? = nil
     var photo: UIImage? = nil
     var isYou: Bool { wakeAt == nil }
 }
 
-extension UIImage {
-    /// Square-cropped circle with transparent corners, for avatars and the 3D chip.
-    func circle(_ side: CGFloat = 256) -> UIImage {
-        UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
-            UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: side, height: side)).addClip()
-            let s = max(side / size.width, side / size.height)
-            draw(in: CGRect(x: (side - size.width * s) / 2, y: (side - size.height * s) / 2, width: size.width * s, height: size.height * s))
-        }
-    }
-}
+enum MateStatus { case waiting, asleep, snoozing, up }
 
 // ponytail: demo wake schedule (seconds after the alarm), swap for live teammate data when there is a backend
 let demoSchedule: [(wake: Double, snooze: Double?)] = [(3.4, nil), (8.2, nil), (14.6, nil), (21.1, nil), (27.9, nil),
     (33.5, 11), (40.3, nil), (47.6, nil), (52.2, nil), (55.8, 30), (58.9, nil)]
 
-struct Wake: Identifiable { let id: String; let rank: Int; let at: Double }
+/// `angle` is where the teammate's badge rests on the dial, in degrees from 12 o'clock.
+struct Wake: Identifiable { let id: String; let rank: Int; let at: Double; let angle: Double }
+
+func secondsToday(_ d: Date) -> Int {
+    let c = Calendar.current.dateComponents([.hour, .minute, .second], from: d)
+    return c.hour! * 3600 + c.minute! * 60 + c.second!
+}
 
 @MainActor @Observable final class Session {
     enum Phase { case idle, ringing, stopped }
@@ -62,7 +36,8 @@ struct Wake: Identifiable { let id: String; let rank: Int; let at: Double }
     var mates: [Mate] = []
     var start: Date?
     var wakes: [Wake] = []
-    var stoppedAt: Double?                       // when you slid to stop
+    var stoppedAt: Double?                       // when you tapped the wake-up screen
+    var t: Double = 0                            // elapsed, refreshed by tick() so views update
     var elapsed: Double { start.map { Date().timeIntervalSince($0) } ?? 0 }
     var allUp: Bool { !mates.isEmpty && wakes.count == mates.count }
     var isCoach = false
@@ -86,10 +61,10 @@ struct Wake: Identifiable { let id: String; let rank: Int; let at: Double }
             Mate(id: m.id, initials: m.initials, name: "\(m.first) \(m.last)", wakeAt: s.wake, snoozeAt: s.snooze)
         }
     }
-    /// Start the team wake-up. With `youWokeAt` (the second you stopped the real alarm) you open already up: no slider.
+    /// Start the team wake-up. With `youWokeAt` (the second you stopped the real alarm) you open already up.
     func ring(_ app: AppState, startedAt: Date = .now, youWokeAt: Date? = nil) {
-        phase = .idle; prepare(app); wakes = []; stoppedAt = nil; start = startedAt; phase = .ringing
-        alarmClock = Double(ClockHeader.secondsToday(startedAt))
+        phase = .idle; prepare(app); wakes = []; stoppedAt = nil; start = startedAt; t = elapsed; phase = .ringing
+        alarmClock = Double(secondsToday(startedAt))
         if let you = youWokeAt {
             let yt = max(0, you.timeIntervalSince(startedAt))
             for m in mates.filter({ ($0.wakeAt ?? .infinity) < yt }).sorted(by: { $0.wakeAt! < $1.wakeAt! }) { wake(m.id, at: m.wakeAt!) }
@@ -101,11 +76,19 @@ struct Wake: Identifiable { let id: String; let rank: Int; let at: Double }
         if !isCoach && !allUp { TeamRinger.start() }   // the team rule: keeps ringing until the last one is up
     }
     func stop() { stoppedAt = elapsed; phase = .stopped; wake("you") }
-    func reset(_ app: AppState) { TeamRinger.stop(); phase = .idle; start = nil; wakes = []; stoppedAt = nil; prepare(app) }
+    func reset(_ app: AppState) { TeamRinger.stop(); phase = .idle; start = nil; wakes = []; stoppedAt = nil; t = 0; prepare(app) }
 
-    func wake(_ id: String, at t: Double? = nil) {
+    /// Called ~10x a second: advances the clock and wakes teammates on their demo schedule.
+    func tick() {
+        guard phase != .idle else { return }
+        t = elapsed
+        for m in mates { if let w = m.wakeAt, t >= w { wake(m.id) } }
+    }
+
+    func wake(_ id: String, at time: Double? = nil) {
         guard !wakes.contains(where: { $0.id == id }) else { return }
-        wakes.append(Wake(id: id, rank: wakes.count + 1, at: t ?? elapsed))
+        let at = time ?? elapsed
+        wakes.append(Wake(id: id, rank: wakes.count + 1, at: at, angle: restAngle(at)))
         if allUp { TeamRinger.stop() }
         if isCoach && allUp && phase == .ringing { stoppedAt = elapsed; phase = .stopped }   // coach view: done when the team is
         if allUp, let last = mates.first(where: { $0.id == id }) {
@@ -116,14 +99,19 @@ struct Wake: Identifiable { let id: String; let rank: Int; let at: Double }
     }
     func wake(of id: String) -> Wake? { wakes.first { $0.id == id } }
 
-    /// Glow level 0...1. Rises like a sunrise, breathes while ringing, settles once stopped. Continuous everywhere.
-    func glow(at t: Double) -> Double {
-        if phase == .idle { return 0.12 }  // pre-dawn
-        let ring = 0.12 + 0.88 * ease(t / 3.2) - 0.07 * (1 - cos(t * 2 * .pi / 1.6)) * ease((t - 2) / 2)
-        guard let s = stoppedAt else { return ring }
-        let k = exp(-(t - s) / 0.9)
-        let atStop = 0.12 + 0.88 * ease(s / 3.2)
-        return 0.32 + (atStop - 0.32) * k - 0.07 * (1 - cos(t * 2 * .pi / 1.6)) * ease((t - 2) / 2) * k
+    func status(_ m: Mate) -> MateStatus {
+        if wake(of: m.id) != nil { return .up }
+        if phase == .idle { return .waiting }
+        if let s = m.snoozeAt, t >= s { return .snoozing }
+        return .asleep
+    }
+
+    /// Where the second hand was when they woke, nudged so badges never overlap.
+    private func restAngle(_ at: Double) -> Double {
+        var a = (at.truncatingRemainder(dividingBy: 60)) / 60 * 360 + 6
+        let gap = 17.0
+        while wakes.contains(where: { abs(remainder($0.angle - a, 360)) < gap }) { a += gap }
+        return a
     }
 }
 
@@ -142,15 +130,11 @@ struct Wake: Identifiable { let id: String; let rank: Int; let at: Double }
     static func stop() { player?.stop(); player = nil }
 }
 
-private func ease(_ x: Double) -> Double { let t = min(max(x, 0), 1); return t * t * (3 - 2 * t) }
-
 // MARK: - UI
 
 struct AlarmHome: View {
     @Environment(AppState.self) private var app
     @State private var session = Session()
-    @State private var rig = Rig()
-    @State private var loaded = false   // ridge + watch fade in together once the model is ready, no flash
     @State private var sheet: Corner?
     @State private var alarmSheet = false
     @Environment(\.scenePhase) private var scenePhase
@@ -167,108 +151,41 @@ struct AlarmHome: View {
     }
     enum Corner: String, Identifiable { case teams, settings; var id: String { rawValue } }
 
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width, h = w * 1400 / 1179  // hero matches the Blender camera frame
-            let top: CGFloat = 40                        // clear of the Dynamic Island and corner buttons
-            ZStack(alignment: .top) {
-                Color.black
-                TimelineView(.animation) { tl in
-                    let level = session.glow(at: session.elapsed)
-                    ZStack(alignment: .top) {
-                        Glow(level: level, crest: (top + 0.58 * h) / (top + h))  // runs to the top edge, no seam
-                        ZStack {
-                            Image(uiImage: UIImage(named: "ridge_dark")!).resizable()
-                            Image(uiImage: UIImage(named: "ridge_lit")!).resizable().opacity(level)
-                        }
-                        .frame(width: w, height: h)
-                        .mask(LinearGradient(stops: [.init(color: .black, location: 0.72), .init(color: .clear, location: 1)],
-                                             startPoint: .top, endPoint: .bottom))  // ground melts into the black, no edge
-                        .padding(.top, top)
-                        .opacity(loaded ? 1 : 0)
-                    }
-                    .frame(width: w, height: top + h)
-                    .onChange(of: level) { rig.glow = Float(level) }
-                }
-                RealityView { content in
-                    rig.onReady = { withAnimation(.easeOut(duration: 0.7)) { loaded = true } }
-                    await rig.build(content, session: session)
-                }
-                    .frame(width: w, height: h)
-                    .padding(.top, top)
-                    .opacity(loaded ? 1 : 0)
-                    .gesture(DragGesture(minimumDistance: 0)
-                        .onChanged { rig.press($0.translation) }
-                        .onEnded { rig.release($0.translation) })
+    private var showWakeUp: Bool { session.phase == .ringing && !session.isCoach }
 
-                VStack(spacing: 0) {
-                    Spacer().frame(height: top + h * 0.86).allowsHitTesting(false)
-                    ClockHeader(session: session)  // fixed: the list scrolls under it
-                    ScrollView {
-                        TeamList(session: session).padding(.top, 14).padding(.bottom, 24)
-                    }
-                    .scrollIndicators(.hidden)
-                    .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.05),
-                                                 .init(color: .black, location: 0.93), .init(color: .clear, location: 1)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .background(alignment: .top) {
-                        LinearGradient(colors: [.clear, .black.opacity(0.85), .black], startPoint: .top, endPoint: .init(x: 0.5, y: 0.2))
-                            .allowsHitTesting(false)
-                    }
-                    Group {
-                        switch session.phase {
-                        case .idle:
-                            HStack(spacing: 12) {
-                                Button { alarmSheet = true } label: {
-                                    if session.isCoach {   // coach sets the team's time, not their own alarm
-                                        Label("Team \(session.team.timeText)", systemImage: "person.3.fill")
-                                            .frame(maxWidth: .infinity).padding(.vertical, 6)
-                                    } else {
-                                        Label(app.myAlarm.map { $0.formatted(date: .omitted, time: .shortened) } ?? "Set Alarm", systemImage: "alarm.fill")
-                                            .frame(maxWidth: .infinity).padding(.vertical, 6)
-                                    }
-                                }
-                                .buttonStyle(.glass)
-                                Button { withAnimation(.smooth) { session.ring(app) } } label: {
-                                    Label("Demo", systemImage: "play.fill").padding(.vertical, 6).padding(.horizontal, 4)
-                                }
-                                .buttonStyle(.glass)
-                            }
-                            .tint(.white)
-                        case .ringing where session.isCoach:
-                            Label("Tap a sleeper to flash them", systemImage: "flashlight.on.fill")
-                                .font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, minHeight: 50)
-                                .background(.ultraThinMaterial, in: Capsule())
-                        case .ringing:
-                            SlideToStop { withAnimation(.smooth(duration: 0.5)) { session.stop() } }
-                                .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                        case .stopped:  // recap stays up; Done goes back to the waiting screen
-                            Button { withAnimation(.smooth) { session.reset(app) } } label: {
-                                Text("Done").frame(maxWidth: .infinity).padding(.vertical, 6)
-                            }
-                            .buttonStyle(.glass)
-                        }
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 8)
-                    .background(alignment: .bottom) {  // black fades up behind the controls so the list sinks under them
-                        LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black.opacity(0.85), location: 0.45),
-                                               .init(color: .black, location: 1)], startPoint: .top, endPoint: .bottom)
-                            .frame(height: 200)
-                            .padding(.bottom, -60)
-                            .allowsHitTesting(false)
-                    }
-                }
+    var body: some View {
+        ZStack(alignment: .top) {
+            Clique.panel.ignoresSafeArea()
+            Dial(session: session)
+                .padding(.top, 54)
+                .ignoresSafeArea(edges: .top)
+            VStack(spacing: 0) {
+                Color.clear.frame(height: 224 - 54)   // panel starts across the dial's middle
+                panel
             }
             .ignoresSafeArea(edges: .top)
-            .overlay(alignment: .top) {  // Teams top left, Settings top right. No tab bar: this screen is only the alarm.
+            .padding(.top, 54)
+
+            if showWakeUp {
+                WakeUpScreen(team: session.team.name) { withAnimation(.smooth(duration: 0.5)) { session.stop() } }
+                    .transition(.asymmetric(insertion: .opacity, removal: .opacity.combined(with: .scale(scale: 1.15))))
+                    .zIndex(1)
+            }
+        }
+        .overlay(alignment: .top) {  // Teams top left, Settings top right
+            if !showWakeUp {
                 HStack {
                     CornerButton(symbol: "person.2.fill", label: "Teams") { sheet = .teams }
                     Spacer()
                     CornerButton(symbol: "gearshape.fill", label: "Settings") { sheet = .settings }
                 }
                 .padding(.horizontal, 20)
+            }
+        }
+        .task {   // drives teammates waking on the demo schedule
+            while !Task.isCancelled {
+                session.tick()
+                try? await Task.sleep(for: .milliseconds(100))
             }
         }
         .onAppear { session.prepare(app); ringIfPending() }
@@ -281,88 +198,320 @@ struct AlarmHome: View {
             Group { if c == .teams { TeamsTab() } else { SettingsTab() } }
                 .presentationDragIndicator(.visible)
         }
-        .background(.black)
+        .animation(.smooth(duration: 0.5), value: showWakeUp)
         .sensoryFeedback(.success, trigger: session.wakes.count)
     }
-}
 
-/// Sunrise bloom behind the ridge: a wide amber halo and a warm white core, both gaussian falloffs.
-/// It climbs as it brightens. A faint noise layer dithers away banding in the dark gradient.
-struct Glow: View {
-    let level: Double, crest: Double
-    static let dither = Image(uiImage: noiseImage())
+    /// The dark sheet: time, wake/practice line, the team, and the controls.
+    private var panel: some View {
+        VStack(spacing: 0) {
+            ClockHeader(session: session, alarm: app.myAlarm)
+                .padding(.top, 50)
+            ScrollView {
+                TeamList(session: session).padding(.top, 50).padding(.bottom, 120)
+            }
+            .scrollIndicators(.hidden)
+            .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.06)],
+                                 startPoint: .top, endPoint: .bottom))
+            .overlay(alignment: .bottom) { controls }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Clique.ink, in: UnevenRoundedRectangle(topLeadingRadius: 25, topTrailingRadius: 25))
+        .ignoresSafeArea(edges: .bottom)
+    }
 
-    var body: some View {
-        GeometryReader { g in
-            let w = g.size.width, h = g.size.height
-            let cy = h * (crest + (1 - level) * 0.10)
-            ZStack {
-                halo(Color(red: 1, green: 0.48, blue: 0.2), level * 0.95)
-                    .frame(width: w * 2.0, height: h * 1.05).position(x: w / 2, y: cy)
-                halo(Color(red: 1, green: 0.86, blue: 0.7), level)
-                    .frame(width: w * 0.85, height: h * 0.36).position(x: w / 2, y: cy)
-                Rectangle().fill(.image(Self.dither)).opacity(0.03).blendMode(.plusLighter)
+    @ViewBuilder private var controls: some View {
+        Group {
+            switch session.phase {
+            case .idle:
+                HStack(spacing: 12) {
+                    Button { alarmSheet = true } label: {
+                        if session.isCoach {   // coach sets the team's time, not their own alarm
+                            Text("Team \(session.team.timeText)")
+                        } else {
+                            Text(app.myAlarm.map { "Alarm \($0.formatted(date: .omitted, time: .shortened))" } ?? "Set Alarm")
+                        }
+                    }
+                    .buttonStyle(.clique)
+                    Button("Demo") { withAnimation(.smooth) { session.ring(app) } }
+                        .buttonStyle(CliqueButtonStyle(prominent: false))
+                        .frame(width: 120)
+                }
+            case .ringing:   // only the coach sees this: everyone else is on the wake-up screen
+                Label("Tap a sleeper to flash them", systemImage: "flashlight.on.fill")
+                    .font(.gothamBold(16)).foregroundStyle(Clique.green)
+                    .frame(maxWidth: .infinity, minHeight: 56)
+                    .background(Clique.panel)
+            case .stopped:  // recap stays up; Done goes back to the waiting screen
+                Button("Done") { withAnimation(.smooth) { session.reset(app) } }
+                    .buttonStyle(.clique)
             }
         }
-        .drawingGroup()
-    }
-
-    func halo(_ c: Color, _ a: Double) -> some View {
-        let stops = stride(from: 0.0, through: 1.0, by: 0.1).map { x in
-            Gradient.Stop(color: c.opacity(a * exp(-pow(x * 2.6, 2))), location: x)
+        .padding(.horizontal, 25)
+        .padding(.bottom, 34)
+        .background(alignment: .bottom) {  // the list sinks under the controls
+            LinearGradient(stops: [.init(color: Clique.ink.opacity(0), location: 0), .init(color: Clique.ink, location: 0.5)],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: 160)
+                .allowsHitTesting(false)
         }
-        return Rectangle().fill(EllipticalGradient(stops: stops))
-    }
-
-    static func noiseImage() -> UIImage {
-        let n = 128
-        let bytes = (0..<n * n).map { _ in UInt8.random(in: 0...255) }
-        let ctx = CGContext(data: nil, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n,
-                            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)!
-        ctx.data!.copyMemory(from: bytes, byteCount: bytes.count)
-        return UIImage(cgImage: ctx.makeImage()!)
     }
 }
 
-/// Big digital time, then date and practice time. Stays put while the list scrolls.
+// MARK: Dial
+
+/// Grey dial with a red second hand. Teammates who are up sit on the rim as green shields with initials,
+/// each landing where the hand was when they woke.
+struct Dial: View {
+    let session: Session
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Clique.stone)
+            Circle().fill(Clique.face).padding(8)
+            ForEach(Array(stride(from: 0, to: 360, by: 30)), id: \.self) { a in   // hour ticks
+                Capsule().fill(Clique.stone.opacity(0.6))
+                    .frame(width: 3, height: a % 90 == 0 ? 14 : 8)
+                    .offset(y: -155)
+                    .rotationEffect(.degrees(Double(a)))
+            }
+            ForEach(session.wakes) { w in
+                DialBadge(initials: session.mates.first { $0.id == w.id }?.initials ?? "", angle: w.angle)
+            }
+            TimelineView(.animation) { tl in
+                let seconds = session.phase == .idle
+                    ? Double(secondsToday(tl.date) % 60) + tl.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
+                    : session.elapsed
+                Hand()
+                    .fill(Clique.blood)
+                    .frame(width: 5, height: 150)
+                    .offset(y: -75)
+                    .rotationEffect(.degrees(seconds.truncatingRemainder(dividingBy: 60) / 60 * 360))
+            }
+            Circle().fill(Clique.stone).frame(width: 25, height: 25)
+        }
+        .frame(width: 350, height: 350)
+        .accessibilityElement()
+        .accessibilityLabel("\(session.wakes.count) of \(session.mates.count) up")
+    }
+}
+
+/// The second hand: a bar with a pointed tip.
+struct Hand: Shape {
+    func path(in r: CGRect) -> Path {
+        Path { p in
+            p.move(to: CGPoint(x: r.minX, y: r.minY + 30))
+            p.addLine(to: CGPoint(x: r.midX, y: r.minY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.minY + 30))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+            p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+            p.closeSubpath()
+        }
+    }
+}
+
+/// A shield + initials, rotated to face out from the centre. Pops out from the hub when it appears.
+struct DialBadge: View {
+    let initials: String, angle: Double
+    @State private var landed = false
+
+    var body: some View {
+        ZStack {
+            Image("shield_tick").renderingMode(.template).resizable()
+                .foregroundStyle(Clique.green)
+                .frame(width: 30, height: 30)
+                .offset(y: landed ? -153 : -20)
+            Text(initials)
+                .font(.gothamBold(20))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.35), radius: 2)
+                .offset(y: landed ? -126 : -10)
+                .opacity(landed ? 1 : 0)
+        }
+        .scaleEffect(landed ? 1 : 0.3)
+        .rotationEffect(.degrees(angle))
+        .onAppear { withAnimation(.spring(duration: 0.7, bounce: 0.45)) { landed = true } }
+    }
+}
+
+// MARK: Time
+
+/// Big time, then "woke at" / "practice at".
 struct ClockHeader: View {
     let session: Session
+    let alarm: Date?
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { tl in
             // waiting: the real time. ringing or recap: the alarm's clock running from the team's wake time
-            let s = session.phase == .idle ? Self.secondsToday(tl.date) : Int(session.alarmClock + session.elapsed)
+            let s = session.phase == .idle ? secondsToday(tl.date) : Int(session.alarmClock + session.t)
             let h = s / 3600 % 24
-            VStack(spacing: 2) {
-                (Text("\(h % 12 == 0 ? 12 : h % 12):\(String(format: "%02d", s / 60 % 60))")
-                    + Text(h < 12 ? " AM" : " PM").font(.system(size: 26, weight: .semibold, design: .rounded)))
-                    .font(.system(size: 58, weight: .semibold, design: .rounded)).monospacedDigit()
-                    .contentTransition(.numericText())
-                Text("\(Self.day()) | \(session.team.practiceText) Practice")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.secondary)
+            VStack(spacing: 20) {
+                HStack(alignment: .center, spacing: 5) {
+                    Text("\(h % 12 == 0 ? 12 : h % 12):\(String(format: "%02d", s / 60 % 60))")
+                        .font(.display(96)).monospacedDigit()
+                        .contentTransition(.numericText())
+                    Text(h < 12 ? "AM" : "PM").font(.display(32))
+                }
+                .foregroundStyle(Clique.green)
+                .frame(height: 65)
+                HStack(spacing: 10) {
+                    Text(lead).font(.gothamBold(20, relativeTo: .headline))
+                    Text("practice at \(short(session.team.practiceHour, session.team.practiceMinute))").font(.gotham(20, relativeTo: .headline))
+                }
+                .foregroundStyle(.white)
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .contentTransition(.opacity)
             }
-            .shadow(color: .black.opacity(0.8), radius: 12)
             .frame(maxWidth: .infinity)
-            .padding(.bottom, 4)
-            .background {  // darken the ground behind the time so both lines read
-                LinearGradient(colors: [.clear, .black.opacity(0.8), .black], startPoint: .top, endPoint: .bottom)
-                    .padding(.top, -50)
-            }
+            .padding(.horizontal, 16)
         }
     }
 
-    static func secondsToday(_ d: Date) -> Int {
-        let c = Calendar.current.dateComponents([.hour, .minute, .second], from: d)
-        return c.hour! * 3600 + c.minute! * 60 + c.second!
+    private var lead: String {
+        if session.isCoach && session.phase != .idle { return "\(session.wakes.count) of \(session.mates.count) up" }
+        if let you = session.wake(of: "you") {
+            let s = Int(session.alarmClock + you.at)
+            return "woke at \(short(s / 3600 % 24, s / 60 % 60))"
+        }
+        if let alarm { let c = Calendar.current.dateComponents([.hour, .minute], from: alarm); return "alarm at \(short(c.hour!, c.minute!))" }
+        return "no alarm set"
     }
 
-    /// "Wednesday, Nov 11th"
-    static func day(_ d: Date = .now) -> String {
-        let n = Calendar.current.component(.day, from: d)
-        let suffix = (11...13).contains(n % 100) ? "th" : [1: "st", 2: "nd", 3: "rd"][n % 10] ?? "th"
-        return d.formatted(.dateTime.weekday(.wide)) + ", " + d.formatted(.dateTime.month(.abbreviated)) + " \(n)\(suffix)"
+    /// "8:35": no AM/PM, as in the design.
+    private func short(_ h: Int, _ m: Int) -> String { "\(h % 12 == 0 ? 12 : h % 12):\(String(format: "%02d", m))" }
+}
+
+// MARK: Team
+
+struct TeamList: View {
+    let session: Session
+    @State private var open: Mate?   // tapped teammate: their profile drawer
+
+    var body: some View {
+        // woken first in rank order, then everyone still asleep
+        let up = session.wakes.compactMap { w in session.mates.first { $0.id == w.id } }
+        let rest = session.mates.filter { session.wake(of: $0.id) == nil }
+        VStack(spacing: 25) {
+            ForEach(up + rest) { m in
+                MateRow(mate: m, status: session.status(m), ringing: session.phase == .ringing)
+                    .contentShape(Rectangle())
+                    .onTapGesture { if !m.isYou { open = m } }
+            }
+        }
+        .sheet(item: $open) { ProfileDrawer(mate: $0, session: session).presentationDetents([.large]).presentationDragIndicator(.visible) }
+        .animation(.spring(duration: 0.6, bounce: 0.2), value: session.wakes.count)
     }
 }
+
+extension MateStatus {
+    var color: Color {
+        switch self { case .up: Clique.green; case .snoozing: Clique.moss; case .asleep: Clique.blood; case .waiting: Clique.stone }
+    }
+    var barWidth: CGFloat {
+        switch self { case .up, .snoozing: 120; case .waiting: 90; case .asleep: 15 }
+    }
+    var icon: String {
+        switch self { case .up: "shield_tick"; case .snoozing: "timer"; case .asleep: "shield_cross"; case .waiting: "message_question" }
+    }
+    var label: String {
+        switch self { case .up: "up"; case .snoozing: "snoozing"; case .asleep: "still asleep"; case .waiting: "alarm not rung yet" }
+    }
+}
+
+/// A bar from the left edge whose length and colour show status, then the name, then a status icon.
+struct MateRow: View {
+    let mate: Mate, status: MateStatus, ringing: Bool
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 25) {
+            Group {
+                if status == .snoozing { ChamferBar().fill(status.color) } else { Rectangle().fill(status.color) }
+            }
+            .frame(width: status.barWidth, height: 50)
+            .opacity(status == .asleep && ringing && pulse ? 0.45 : 1)   // sleepers throb while the alarm runs
+            .shadow(color: status == .up ? Clique.green.opacity(0.35) : .clear, radius: 12)
+            Text(mate.name)
+                .font(.gothamBold(20, relativeTo: .headline))
+                .foregroundStyle(status.color)
+                .lineLimit(1).minimumScaleFactor(0.7)
+            Spacer(minLength: 8)
+            Image(status.icon).renderingMode(.template).resizable()
+                .foregroundStyle(status.color)
+                .frame(width: 24, height: 24)
+                .id(status)   // swap icons with a pop
+                .transition(.scale(scale: 0.3).combined(with: .opacity))
+        }
+        .padding(.trailing, 25)
+        .frame(height: 50)
+        .animation(.spring(duration: 0.55, bounce: 0.35), value: status)
+        .onAppear { withAnimation(.easeInOut(duration: 0.8).repeatForever()) { pulse = true } }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(mate.isYou ? "You" : mate.name), \(status.label)")
+    }
+}
+
+// MARK: Wake up
+
+/// Full-screen alarm: WAKE UP throbs, rings ripple out, the arrows nudge in. Tap anywhere to stop.
+struct WakeUpScreen: View {
+    let team: String
+    let onStop: () -> Void
+
+    var body: some View {
+        ZStack {
+            Clique.ink.ignoresSafeArea()
+            Ripples(period: 1.4)
+            TimelineView(.animation) { (tl: TimelineViewDefaultContext) in
+                WakeUpMark(time: tl.date.timeIntervalSinceReferenceDate)
+            }
+            VStack {
+                Text(team).font(.gothamBold(17)).foregroundStyle(.white.opacity(0.7))
+                    .padding(.top, 70)
+                Spacer()
+                Text("tap anywhere to stop").font(.gotham(17)).foregroundStyle(Clique.stone)
+                    .padding(.bottom, 60)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onStop)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Wake up. \(team) alarm.")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Stops the alarm")
+        .accessibilityAction(.default) { onStop() }
+    }
+}
+
+/// WAKE UP over its bar, with the arrows. A 1.4 s wave drives the throb and the arrow nudge.
+private struct WakeUpMark: View {
+    let time: Double
+    private var wave: Double { Foundation.sin(time / 1.4 * 2 * Double.pi) }
+    private var beat: Double { (wave + 1) / 2 }   // 0...1, in step with the rings
+    private var nudge: CGFloat { CGFloat(abs(wave) * 8) }
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(Clique.panel).frame(width: 350, height: 15)
+            Text("Wake Up")
+                .font(.display(96)).textCase(.uppercase)
+                .foregroundStyle(Clique.green)
+                .shadow(color: Clique.green.opacity(0.25 + 0.35 * beat), radius: 18)
+                .scaleEffect(1 + 0.08 * CGFloat(beat))
+            HStack {
+                arrow.rotationEffect(.degrees(90)).offset(x: nudge)
+                Spacer()
+                arrow.rotationEffect(.degrees(-90)).offset(x: -nudge)
+            }
+            .frame(width: 370)
+        }
+    }
+
+    private var arrow: some View { Triangle().fill(Clique.green).frame(width: 21.65, height: 18.75) }
+}
+
+// MARK: Sheets
 
 /// Pick your own real alarm time (prototype), or ring in a minute to try it.
 struct AlarmSheet: View {
@@ -375,16 +524,18 @@ struct AlarmSheet: View {
             VStack(spacing: 14) {
                 DatePicker("Alarm", selection: $time, displayedComponents: .hourAndMinute)
                     .datePickerStyle(.wheel).labelsHidden()
-                Button { Task { await app.setMyAlarm(time); dismiss() } } label: {
-                    Text("Set Alarm").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6)
-                }
-                .buttonStyle(.glassProminent).tint(.orange)
+                Button("Set Alarm") { Task { await app.setMyAlarm(time); dismiss() } }
+                    .buttonStyle(.clique)
                 Button("Ring in 1 Minute") { Task { await app.setMyAlarm(.now, inOneMinute: true); dismiss() } }
+                    .buttonStyle(.cliqueQuiet)
                 if app.myAlarm != nil {
                     Button("Turn Off", role: .destructive) { app.clearMyAlarm(); dismiss() }
+                        .font(.gothamBold(17)).foregroundStyle(Clique.blood).padding(.top, 4)
                 }
             }
             .padding(.horizontal, 24)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .background(Clique.ink)
             .navigationTitle("Your Alarm")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
@@ -408,7 +559,10 @@ struct CoachAlarmSheet: View {
                 } footer: {
                     Text("Your players' alarms ring at wake up. You aren't woken.")
                 }
+                .listRowBackground(Clique.panel)
             }
+            .scrollContentBackground(.hidden)
+            .background(Clique.ink)
             .navigationTitle(app.teams.first?.name ?? "Team")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -437,345 +591,10 @@ struct CornerButton: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Clique.green)
                 .frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().strokeBorder(.white.opacity(0.14)))
-                .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
+                .background(Clique.ink, in: Circle())
         }
         .accessibilityLabel(label)
     }
-}
-
-struct TeamList: View {
-    let session: Session
-    @State private var open: Mate?   // tapped teammate: their profile drawer
-    var body: some View {
-        // woken first in rank order, then everyone still asleep
-        let up = session.wakes.compactMap { w in session.mates.first { $0.id == w.id }.map { (mate: $0, wake: Optional(w)) } }
-        let asleep = session.mates.filter { session.wake(of: $0.id) == nil }.map { (mate: $0, wake: Optional<Wake>.none) }
-        VStack(spacing: 0) {
-            ForEach(up + asleep, id: \.mate.id) { row in
-                MateRow(mate: row.mate, wake: row.wake, color: color(row.mate, row.wake), alarmClock: session.alarmClock)
-                    .contentShape(Rectangle())
-                    .onTapGesture { if !row.mate.isYou { open = row.mate } }
-            }
-        }
-        .padding(.horizontal, 20)
-        .sheet(item: $open) { ProfileDrawer(mate: $0, session: session).presentationDetents([.large]).presentationDragIndicator(.visible) }
-        .animation(.spring(duration: 0.55, bounce: 0.15), value: session.wakes.count)
-    }
-
-    // green up, red last up (once everyone is), orange snoozed, gray asleep
-    func color(_ m: Mate, _ w: Wake?) -> Color {
-        if let w { return session.allUp && w.rank == session.mates.count ? .red : .green }
-        if let s = m.snoozeAt, session.elapsed >= s { return .orange }
-        return Color(white: 0.28)
-    }
-}
-
-struct MateRow: View {
-    let mate: Mate, wake: Wake?, color: Color, alarmClock: Double
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(wake.map { "\($0.rank)" } ?? "")
-                .font(.system(size: 15, weight: .medium, design: .rounded)).monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(width: 14, alignment: .trailing)
-            Text(mate.photo == nil ? mate.initials : "")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(wake == nil && color == Color(white: 0.28) ? Color(white: 0.7) : .white)
-                .frame(width: 30, height: 30)
-                .background(color.gradient, in: Circle())
-                .overlay {   // your photo sits inside a thin status ring
-                    if let p = mate.photo { Image(uiImage: p).resizable().scaledToFill().frame(width: 25, height: 25).clipShape(Circle()) }
-                }
-                .shadow(color: color.opacity(wake == nil ? 0 : 0.45), radius: 6)
-                .overlay(alignment: .bottomTrailing) {
-                    if mate.isYou {
-                        Circle().fill(.blue).frame(width: 9, height: 9).overlay(Circle().stroke(.black, lineWidth: 1.5))
-                    }
-                }
-            Text(mate.name)
-                .font(.system(size: 17, weight: mate.isYou ? .semibold : .regular))
-                .foregroundStyle(wake == nil ? .secondary : .primary)
-            Spacer()
-            Text(wake.map { clock($0.at) } ?? "")
-                .font(.system(size: 17)).monospacedDigit()
-        }
-        .frame(height: 40)
-        .shadow(color: .black.opacity(0.7), radius: 8)
-        .transition(.opacity)
-    }
-    func clock(_ t: Double) -> String {
-        let s = Int(alarmClock + t)
-        return String(format: "%d:%02d:%02d", s / 3600, s / 60 % 60, s % 60)
-    }
-}
-
-/// iOS alarm style: drag the knob across to stop.
-struct SlideToStop: View {
-    let onStop: () -> Void
-    @State private var x: CGFloat = 0
-    @State private var done = false
-
-    var body: some View {
-        GeometryReader { geo in
-            let knob: CGFloat = 56, travel = geo.size.width - knob - 8
-            ZStack(alignment: .leading) {
-                Capsule().fill(LinearGradient(colors: [Color(red: 1, green: 0.62, blue: 0.2), .orange], startPoint: .top, endPoint: .bottom))
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.25)))
-                    .shadow(color: .orange.opacity(0.35), radius: 18, y: 6)
-                TimelineView(.animation) { tl in
-                    let t = tl.date.timeIntervalSinceReferenceDate
-                    Text("slide to stop")
-                        .font(.system(size: 19, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .overlay {  // the classic shimmer sweeping left to right
-                            LinearGradient(colors: [.clear, .white, .clear], startPoint: .leading, endPoint: .trailing)
-                                .frame(width: 70)
-                                .offset(x: CGFloat((t.truncatingRemainder(dividingBy: 2.4)) / 2.4) * 260 - 130)
-                        }
-                        .mask(Text("slide to stop").font(.system(size: 19, weight: .regular)))
-                        .frame(maxWidth: .infinity)
-                        .padding(.leading, knob)
-                        .opacity(1 - Double(x / travel) * 1.6)
-                }
-                Circle().fill(.white)
-                    .overlay(Image(systemName: "chevron.right.2").font(.system(size: 20, weight: .semibold)).foregroundStyle(.orange))
-                    .frame(width: knob, height: knob)
-                    .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
-                    .padding(.leading, 4)
-                    .offset(x: x)
-                    .gesture(DragGesture()
-                        .onChanged { v in if !done { x = min(max(v.translation.width, 0), travel) } }
-                        .onEnded { _ in
-                            if x > travel * 0.85 {
-                                done = true
-                                withAnimation(.spring(duration: 0.25)) { x = travel }
-                                onStop()
-                            } else {
-                                withAnimation(.spring(duration: 0.45, bounce: 0.3)) { x = 0 }
-                            }
-                        })
-            }
-        }
-        .frame(height: 64)
-    }
-}
-
-// MARK: - 3D
-
-/// Owns the loaded stopwatch and drives the hand + avatar chips each frame.
-/// Chip and hand math is in the model's Blender frame: face normal = -Y, 12 o'clock = +Z.
-@MainActor final class Rig {
-    var session: Session!
-    var root = Entity()
-    var hand: Entity?
-    var chips: [String: Chip] = [:]
-    var glow: Float = 0
-    var ibl: Entity?
-    var rim: DirectionalLight?
-    var sub: EventSubscription?
-    var tilt: Entity?
-    // finger tilt: drag leans the watch toward the finger, rubber-banded; springs back on release
-    var lean = SIMD2<Float>.zero, leanV = SIMD2<Float>.zero, leanGoal = SIMD2<Float>.zero
-    var touching = false
-    let tap = UIImpactFeedbackGenerator(style: .soft)
-
-    func press(_ d: CGSize) {
-        if !touching { touching = true; tap.impactOccurred(intensity: 0.6) }
-        let k: Float = 0.30  // max lean, radians (~17 deg)
-        leanGoal = [k * tanh(Float(d.width) / 170), k * tanh(Float(d.height) / 170)]
-    }
-    func release(_ d: CGSize) {
-        touching = false
-        leanGoal = .zero
-        if abs(d.width) + abs(d.height) < 6 { leanV += [0, -2.2] }  // a tap: little nod
-    }
-
-    /// Spring-driven avatar: grows out of the dial centre, rides the hand out, lands in the groove.
-    final class Chip {
-        let e: Entity; let born: Double; let rest: Float
-        var pos = SIMD3<Float>(0, -0.37, 0), vel = SIMD3<Float>.zero
-        var s: Float = 0.02, sv: Float = 0
-        init(_ e: Entity, born: Double, rest: Float) { self.e = e; self.born = born; self.rest = rest }
-    }
-
-    var onReady: (() -> Void)?   // fires once the watch has actually been drawn, not just loaded
-    private var frames = 0
-    private static var cached: Entity?
-    /// Load once, hand out clones (they share meshes and textures).
-    static func stopwatch() async -> Entity? {
-        if cached == nil { cached = try? await Entity(named: "Stopwatch") }
-        return cached?.clone(recursive: true)
-    }
-
-    func build(_ content: RealityViewCameraContent, session: Session) async {
-        self.session = session
-        // onboarding preloads the watch, so landing on home after it is instant
-        guard let model = await Rig.stopwatch() else { return }
-        root = model.findEntity(named: "Stopwatch") ?? model
-        hand = model.findEntity(named: "Hand_Seconds")
-
-        let anchor = Entity()
-        let tilt = Entity()
-        tilt.addChild(model)
-        anchor.addChild(tilt)
-        content.add(anchor)
-        self.tilt = tilt
-
-        let cam = PerspectiveCamera()  // same frame as the Blender hero camera (85mm)
-        cam.camera.fieldOfViewInDegrees = 26.5
-        cam.position = [0, 0.05, 7.6]
-        content.add(cam)
-
-        if let env = try? await EnvironmentResource(equirectangular: studioImage()) {
-            anchor.components.set(ImageBasedLightComponent(source: .single(env), intensityExponent: -0.6))
-            model.visit { $0.components.set(ImageBasedLightReceiverComponent(imageBasedLight: anchor)) }
-            ibl = anchor
-        }
-        let key = DirectionalLight()  // lighting B: low warm sun from the left, raking across the stone
-        key.light.color = UIColor(red: 1, green: 0.8, blue: 0.62, alpha: 1)
-        key.light.intensity = 3800
-        key.shadow = DirectionalLightComponent.Shadow(maximumDistance: 4, depthBias: 2)
-        key.look(at: .zero, from: [-6.5, 1.0, 0.35], relativeTo: nil)
-        content.add(key)
-
-        let rim = DirectionalLight()  // warm sunrise from behind the ridge; tracks the glow
-        rim.light.color = UIColor(red: 1, green: 0.7, blue: 0.45, alpha: 1)
-        rim.look(at: .zero, from: [0, -0.6, -4], relativeTo: nil)
-        content.add(rim)
-        self.rim = rim
-
-        sub = content.subscribe(to: SceneEvents.Update.self) { [weak self] e in self?.tick(Float(e.deltaTime)) }
-    }
-
-    func tick(_ dt: Float) {
-        frames += 1
-        if frames == 4 { onReady?(); onReady = nil }
-        let t = session.elapsed
-        if session.phase != .idle { for m in session.mates { if let w = m.wakeAt, t >= w { session.wake(m.id) } } }
-        if session.wakes.isEmpty && !chips.isEmpty { chips.values.forEach { $0.e.removeFromParent() }; chips = [:] }  // back to idle
-        let angle = Float(t.truncatingRemainder(dividingBy: 60) / 60 * 2 * .pi)
-        hand?.orientation = simd_quatf(angle: angle, axis: [0, 1, 0])
-
-        rim?.light.intensity = 600 + 5200 * glow
-        ibl?.components[ImageBasedLightComponent.self]?.intensityExponent = -0.9 + 0.7 * glow
-
-        let dt0 = min(dt, 1 / 30)
-        let w: Float = touching ? 14 : 6, z: Float = touching ? 1 : 0.5  // firm under the finger, heavy slow wobble otherwise
-        leanV += (w * w * (leanGoal + PhoneTilt.shared.lean(dt0) - lean) - 2 * z * w * leanV) * dt0
-        lean += leanV * dt0
-        tilt?.orientation = simd_quatf(angle: lean.x, axis: [0, 1, 0]) * simd_quatf(angle: lean.y, axis: [1, 0, 0])
-
-        for w in session.wakes where chips[w.id] == nil { spawn(w.id, at: angle, t: t) }
-        let dt = min(dt, 1 / 30)
-        for c in chips.values { step(c, handAngle: angle, t: t, dt: dt) }
-    }
-
-    func step(_ c: Chip, handAngle: Float, t: Double, dt: Float) {
-        let u = Float(t - c.born)
-        // target: ride out along the live hand for 0.9s, then the groove slot
-        let target: SIMD3<Float>
-        if u < 0.9 {
-            let p = Float(ease(Double(u / 0.9)))
-            target = polar(0.58 * p, handAngle, y: -0.40 - 0.05 * sin(p * .pi))
-        } else {
-            target = polar(0.71, c.rest, y: -0.33)
-        }
-        // critically damped position spring keeps it one continuous curve
-        let w: Float = 13, z: Float = 1
-        c.vel += (w * w * (target - c.pos) - 2 * z * w * c.vel) * dt
-        c.pos += c.vel * dt
-        // scale: underdamped spring for a soft pop, grows while it travels
-        let goal: Float = u < 0.9 ? 0.35 + 0.75 * min(u / 0.9, 1) : 1
-        let ws: Float = 11, zs: Float = 0.55
-        c.sv += (ws * ws * (goal - c.s) - 2 * zs * ws * c.sv) * dt
-        c.s += c.sv * dt
-        c.e.position = c.pos
-        c.e.scale = .init(repeating: max(c.s, 0.01))
-    }
-
-    func spawn(_ id: String, at handAngle: Float, t: Double) {
-        // rest where the hand was, nudged so chips never overlap
-        var a = handAngle + 0.12
-        let gap: Float = 13 * .pi / 180
-        let taken = chips.values.map(\.rest)
-        while taken.contains(where: { abs(remainder($0 - a, 2 * .pi)) < gap }) { a += gap }
-        let mate = session.mates.first { $0.id == id }
-        let e = makeChip(mate?.initials ?? "", photo: mate?.photo)
-        e.scale = .init(repeating: 0.02)
-        e.position = [0, -0.37, 0]
-        root.addChild(e)
-        chips[id] = Chip(e, born: t, rest: a)
-    }
-
-    func polar(_ r: Float, _ a: Float, y: Float) -> SIMD3<Float> { [r * sin(a), y, r * cos(a)] }
-
-    func makeChip(_ initials: String, photo: UIImage? = nil) -> Entity {
-        let chip = Entity()
-        var m = PhysicallyBasedMaterial()
-        m.baseColor = .init(tint: UIColor(red: 0.16, green: 0.78, blue: 0.35, alpha: 1))
-        m.roughness = 0.38
-        m.clearcoat = 0.8
-        m.clearcoatRoughness = 0.15
-        let disc = ModelEntity(mesh: .generateCylinder(height: 0.024, radius: 0.075), materials: [m])
-        chip.addChild(disc)
-
-        if let cg = photo?.circle().cgImage, let tex = try? TextureResource(image: cg, options: .init(semantic: .color)) {
-            // your photo on the chip face, inside a green rim
-            var face = UnlitMaterial()
-            face.color = .init(tint: .white, texture: .init(tex))
-            face.opacityThreshold = 0.5
-            let plane = ModelEntity(mesh: .generatePlane(width: 0.128, depth: 0.128), materials: [face])
-            plane.orientation = simd_quatf(angle: .pi, axis: [1, 0, 0])  // face the viewer (-Y)
-            plane.position = [0, -0.0125, 0]
-            chip.addChild(plane)
-            return chip
-        }
-        let base = UIFont.systemFont(ofSize: 0.062, weight: .bold)
-        let font = UIFont(descriptor: base.fontDescriptor.withDesign(.rounded) ?? base.fontDescriptor, size: 0.062)
-        let mesh = MeshResource.generateText(initials, extrusionDepth: 0.002, font: font)
-        let text = ModelEntity(mesh: mesh, materials: [UnlitMaterial(color: .white)])
-        let c = mesh.bounds.center
-        text.orientation = simd_quatf(angle: .pi / 2, axis: [1, 0, 0])  // face the viewer (-Y)
-        text.position = [-c.x, -0.0125, -c.y]
-        chip.addChild(text)
-        return chip
-    }
-
-    /// HDR studio: soft cool dome, two softboxes, warm sunrise band on the horizon.
-    func studioImage() -> CGImage {
-        let w = 512, h = 256
-        var px = [Float](repeating: 0, count: w * h * 4)
-        for j in 0..<h {
-            let lat = (0.5 - (Float(j) + 0.5) / Float(h)) * .pi       // +pi/2 up
-            for i in 0..<w {
-                let lon = (Float(i) + 0.5) / Float(w) * 2 * .pi
-                var r: Float = 0, g: Float = 0, b: Float = 0
-                let up = max(sin(lat), 0)
-                r += 0.10 * up; g += 0.11 * up; b += 0.13 * up                   // dome
-                let back = pow(max(cos(lon - .pi), 0), 2)                         // only behind the watch
-                let band = back * exp(-pow((lat - 0.05) / 0.12, 2))               // horizon sunrise
-                r += 1.6 * band; g += 0.95 * band; b += 0.5 * band
-                for box in [Float(0.6), 3.7] {                                    // softboxes, 35 deg up
-                    let d = pow(remainder(lon - box, 2 * .pi) / 0.35, 2) + pow((lat - 0.6) / 0.22, 2)
-                    let k = 3.2 * exp(-d * d)
-                    r += k; g += k * 1.02; b += k * 1.06
-                }
-                let o = (j * w + i) * 4
-                px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = 1
-            }
-        }
-        let data = px.withUnsafeBufferPointer { Data(buffer: $0) } as CFData
-        return CGImage(width: w, height: h, bitsPerComponent: 32, bitsPerPixel: 128, bytesPerRow: w * 16,
-                       space: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!,
-                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
-                       provider: CGDataProvider(data: data)!, decode: nil, shouldInterpolate: true, intent: .defaultIntent)!
-    }
-}
-
-extension Entity {
-    func visit(_ f: (Entity) -> Void) { f(self); children.forEach { $0.visit(f) } }
 }

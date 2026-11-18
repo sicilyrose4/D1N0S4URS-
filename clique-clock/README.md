@@ -11,9 +11,14 @@ The SwiftUI iPhone app behind the TestFlight builds. This is the code for build 
 
 The simulator needs no Apple account setup. To run on your own iPhone, select the TeamAlarm target, open Signing & Capabilities, and pick your own team. Real alarms (AlarmKit) only ring on a real phone; the simulator falls back to notifications.
 
-## Not included
+## This branch: Quin's 2D version
 
-The two 3D models (`Stopwatch.usdz` and `Onboarding.usdz`, about 50MB) are left out to keep the repo light. The app still builds and runs without them, but the 3D stopwatch and onboarding objects won't show. Ask Nathan for the files and drop them into `TeamAlarm/Stopwatch/` and `TeamAlarm/Onboarding3D/`.
+Everything is 2D (no 3D models needed). The look comes from Quin's Figma frames "1/wake up screen" and "1/alarm demo": dark charcoal, bright green, Basketball and Gotham type.
+
+- When the alarm rings, a full-screen WAKE UP pulses with rings rippling out. Tap anywhere to stop it.
+- The home screen has a grey dial where teammates land as green shields when they wake. Under it is one bar per teammate: green is up, dark green is snoozing, red is still asleep, grey means the alarm hasn't rung yet.
+- The fonts are in `Shared/Fonts/` (school project use only).
+- There's also a web version you can try in a browser: open `web/clique-clock.html`, or use the link Quin shares.
 
 ## Making your own version
 
@@ -25,7 +30,8 @@ Nathan uploads the versions the group picks to TestFlight.
 
 ## Where things are
 
-- `TeamAlarm/Stopwatch/AlarmHome.swift`: the home screen, alarm picker, and team ring
+- `Shared/Theme.swift`: colors, fonts, buttons and the ripple rings
+- `TeamAlarm/Stopwatch/AlarmHome.swift`: the home screen, dial, team bars, and WAKE UP screen
 - `TeamAlarm/Onboarding.swift`: name, join team, notifications
 - `TeamAlarm/TeamsTab.swift`, `TeamAlarm/SettingsTab.swift`: Teams and Settings sheets
 - `TeamAlarm/AppState.swift`: app data and the AlarmKit alarm

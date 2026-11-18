@@ -13,7 +13,10 @@ struct TeamsTab: View {
                 ForEach(app.teams) { team in
                     NavigationLink(value: team) { TeamRow(team: team) }
                 }
+                .listRowBackground(Clique.panel)
             }
+            .scrollContentBackground(.hidden)
+            .background(Clique.ink)
             .navigationTitle("Teams")
             .navigationDestination(for: Team.self) { TeamDetail(team: $0) }
             .toolbar {
@@ -32,11 +35,12 @@ private struct TeamRow: View {
         HStack(spacing: 14) {
             Image(systemName: team.symbol)
                 .font(.title3)
+                .foregroundStyle(Clique.ink)
                 .frame(width: 40, height: 40)
-                .background(Color(white: 0.18), in: .circle)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(team.name).font(.headline)
-                Text("\(team.timeText) · \(team.daysText)").font(.subheadline).foregroundStyle(.secondary)
+                .background(Clique.green, in: .circle)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(team.name).font(.gothamBold(17))
+                Text("\(team.timeText) · \(team.daysText)").font(.gotham(14)).foregroundStyle(.white.opacity(0.6))
             }
         }
         .padding(.vertical, 4)
@@ -55,8 +59,8 @@ private struct TeamDetail: View {
         List {
             Section {
                 VStack(spacing: 4) {
-                    Text(live.timeText).font(.system(size: 56, weight: .thin, design: .rounded).monospacedDigit())
-                    Text("\(live.daysText) · Practice \(live.practiceText)").foregroundStyle(.secondary)
+                    Text(live.timeText).font(.display(64)).foregroundStyle(Clique.green).monospacedDigit()
+                    Text("\(live.daysText) · Practice \(live.practiceText)").foregroundStyle(.white.opacity(0.7))
                     if !coachMode {
                         HStack(spacing: 4) { Image(systemName: "lock.fill"); Text("Set by \(team.coach)") }
                             .font(.footnote).foregroundStyle(.secondary).padding(.top, 6)
@@ -70,10 +74,12 @@ private struct TeamDetail: View {
                     DatePicker("Wake Up", selection: time(i, \.hour, \.minute), displayedComponents: .hourAndMinute)
                     DatePicker("Practice", selection: time(i, \.practiceHour, \.practiceMinute), displayedComponents: .hourAndMinute)
                 }
+                .listRowBackground(Clique.panel)
             }
             Section("Coach's Rule") {
                 Label(team.rule, systemImage: "figure.run")
             }
+            .listRowBackground(Clique.panel)
             Section("\(team.members.count + 1) Members") {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 5), spacing: 14) {
                     VStack(spacing: 4) {
@@ -89,13 +95,17 @@ private struct TeamDetail: View {
                 }
                 .padding(.vertical, 6)
             }
+            .listRowBackground(Clique.panel)
             Section {
                 Button("Leave Team", role: .destructive) { confirmLeave = true }
                     .frame(maxWidth: .infinity)
             } footer: {
                 Text("You'll need a new code from \(team.coach) to rejoin.")
             }
+            .listRowBackground(Clique.panel)
         }
+        .scrollContentBackground(.hidden)
+        .background(Clique.ink)
         .navigationTitle(team.name)
         .onDisappear { if coachMode { Task { await app.scheduleAlarms() } } }
         .navigationBarTitleDisplayMode(.inline)
@@ -137,19 +147,21 @@ private struct JoinSheet: View {
         NavigationStack {
             VStack(spacing: 16) {
                 TextField("ABC123", text: $code)
-                    .font(.system(size: 34, weight: .semibold, design: .monospaced))
+                    .font(.display(40))
                     .multilineTextAlignment(.center)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
                     .focused($focused)
                     .padding(.vertical, 14)
-                    .background(Color(white: 0.11), in: .rect(cornerRadius: 14))
+                    .foregroundStyle(Clique.green)
+                    .background(Clique.panel)
                     .onChange(of: code) { _, v in code = String(v.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(6)); failed = false }
                 Text(failed ? "No team found for that code." : "Get the 6-character code from your coach.")
-                    .font(.footnote).foregroundStyle(failed ? .red : .secondary)
+                    .font(.gotham(14)).foregroundStyle(failed ? Clique.blood : .white.opacity(0.6))
                 Spacer()
             }
             .padding(24)
+            .background(Clique.ink)
             .navigationTitle("Join Team")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

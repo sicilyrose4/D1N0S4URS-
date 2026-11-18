@@ -45,23 +45,23 @@ struct NextAlarmView: View {
             VStack(spacing: 0) {
                 Image(systemName: "alarm.fill").font(.caption)
                 Text(entry.time.replacingOccurrences(of: " AM", with: "").replacingOccurrences(of: " PM", with: ""))
-                    .font(.system(.body, design: .rounded).weight(.semibold))
+                    .font(.display(20))
             }
         case .accessoryRectangular:
             VStack(alignment: .leading, spacing: 0) {
                 Label(entry.team, systemImage: "alarm.fill").font(.caption)
-                Text(entry.time).font(.system(.title2, design: .rounded).weight(.semibold))
+                Text(entry.time).font(.display(26))
             }
         default:
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    Image(systemName: "alarm.fill").foregroundStyle(.orange)
+                    Image(systemName: "alarm.fill").foregroundStyle(Clique.green)
                     Spacer()
                 }
                 Spacer()
-                Text(entry.time).font(.system(size: 30, weight: .light, design: .rounded)).minimumScaleFactor(0.7)
-                Text(entry.team).font(.subheadline.weight(.semibold))
-                if entry.when > entry.date { Text(entry.when, style: .relative).font(.caption).foregroundStyle(.secondary) }
+                Text(entry.time).font(.display(38)).foregroundStyle(Clique.green).minimumScaleFactor(0.6).lineLimit(1)
+                Text(entry.team).font(.gothamBold(14))
+                if entry.when > entry.date { Text(entry.when, style: .relative).font(.gotham(12)).foregroundStyle(.white.opacity(0.6)) }
             }
         }
     }
@@ -70,7 +70,7 @@ struct NextAlarmView: View {
 struct NextAlarmWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "NextAlarm", provider: NextAlarmProvider()) { entry in
-            NextAlarmView(entry: entry).containerBackground(.black, for: .widget)
+            NextAlarmView(entry: entry).containerBackground(Clique.ink, for: .widget)
         }
         .configurationDisplayName("Next Alarm")
         .description("Your next alarm and team.")
@@ -85,10 +85,11 @@ private struct Initials: View {
     var up = false
     var body: some View {
         Text(text)
-            .font(.system(size: 11, weight: .semibold, design: .rounded))
-            .foregroundStyle(up ? .green : .secondary)
+            .font(.gothamBold(10))
+            .foregroundStyle(up ? Clique.ink : .white.opacity(0.7))
             .frame(width: 26, height: 26)
-            .background(up ? Color.green.opacity(0.2) : Color(white: 0.22), in: .circle)
+            .background(up ? Clique.green : Clique.panel, in: .circle)
+            .overlay(Circle().stroke(Clique.ink, lineWidth: 1.5))
     }
 }
 
@@ -97,8 +98,8 @@ private struct Progress: View {
     var body: some View {
         GeometryReader { g in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color(white: 0.25))
-                Capsule().fill(.green).frame(width: g.size.width * CGFloat(state.up) / CGFloat(max(1, state.total)))
+                Rectangle().fill(Clique.panel)
+                Rectangle().fill(Clique.green).frame(width: g.size.width * CGFloat(state.up) / CGFloat(max(1, state.total)))
             }
         }
         .frame(height: 6)
@@ -111,10 +112,10 @@ struct TeamWakeLiveActivity: Widget {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Label("\(ctx.attributes.team) · \(ctx.attributes.alarm)", systemImage: "alarm.fill")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.gothamBold(15))
                     Spacer()
                     Text(ctx.state.up == ctx.state.total ? "Everyone's up" : "\(ctx.state.up) of \(ctx.state.total) up")
-                        .font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+                        .font(.display(22)).monospacedDigit().foregroundStyle(Clique.green)
                 }
                 Progress(state: ctx.state)
                 HStack(spacing: -6) {
@@ -123,7 +124,7 @@ struct TeamWakeLiveActivity: Widget {
                 }
             }
             .padding(16)
-            .activityBackgroundTint(.black)
+            .activityBackgroundTint(Clique.ink)
             .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { ctx in
             DynamicIsland {
@@ -131,7 +132,7 @@ struct TeamWakeLiveActivity: Widget {
                     Label(ctx.attributes.team, systemImage: "alarm.fill").font(.subheadline.weight(.semibold))
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text("\(ctx.state.up)/\(ctx.state.total)").font(.title3.monospacedDigit().weight(.semibold)).foregroundStyle(.green)
+                    Text("\(ctx.state.up)/\(ctx.state.total)").font(.display(26)).monospacedDigit().foregroundStyle(Clique.green)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -140,11 +141,11 @@ struct TeamWakeLiveActivity: Widget {
                     }
                 }
             } compactLeading: {
-                Image(systemName: "alarm.fill").foregroundStyle(.green)
+                Image(systemName: "alarm.fill").foregroundStyle(Clique.green)
             } compactTrailing: {
-                Text("\(ctx.state.up)/\(ctx.state.total)").monospacedDigit().foregroundStyle(.green)
+                Text("\(ctx.state.up)/\(ctx.state.total)").font(.display(17)).monospacedDigit().foregroundStyle(Clique.green)
             } minimal: {
-                Text("\(ctx.state.up)").monospacedDigit().foregroundStyle(.green)
+                Text("\(ctx.state.up)").font(.display(17)).monospacedDigit().foregroundStyle(Clique.green)
             }
         }
     }

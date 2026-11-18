@@ -31,7 +31,7 @@ final class AppState {
     var onboarded: Bool { didSet { UserDefaults.standard.set(onboarded, forKey: "onboarded") } }
     var first: String { didSet { UserDefaults.standard.set(first, forKey: "first") } }
     var last: String { didSet { UserDefaults.standard.set(last, forKey: "last") } }
-    /// Your profile photo, saved on the phone; shows in Settings, the team list and your 3D chip.
+    /// Your profile photo, saved on the phone; shows in Settings, the team list and the profile drawer.
     var photo: UIImage? { didSet { try? photo?.jpegData(compressionQuality: 0.85)?.write(to: Self.photoURL); if photo == nil { try? FileManager.default.removeItem(at: Self.photoURL) } } }
     static let photoURL = URL.documentsDirectory.appending(path: "profile.jpg")
     var teams: [Team] { didSet { save() } }     // saved on device; no database in the prototype
@@ -120,7 +120,7 @@ final class AppState {
 
     private func attributes(_ title: String) -> AlarmAttributes<TeamAlarmMeta> {
         AlarmAttributes(presentation: AlarmPresentation(alert: .init(title: LocalizedStringResource(stringLiteral: title))),
-                        metadata: TeamAlarmMeta(team: title), tintColor: .green)
+                        metadata: TeamAlarmMeta(team: title), tintColor: Clique.green)
     }
 
     /// Each team's coach-set alarm, repeating on its days.
@@ -166,7 +166,7 @@ final class AppState {
         // Only the system slide to stop: no second button
         let alert = AlarmPresentation.Alert(title: LocalizedStringResource(stringLiteral: team),
                                             stopButton: AlarmButton(text: "Stop", textColor: .white, systemImageName: "stop.fill"))
-        return AlarmAttributes(presentation: AlarmPresentation(alert: alert), metadata: TeamAlarmMeta(team: team), tintColor: .orange)
+        return AlarmAttributes(presentation: AlarmPresentation(alert: alert), metadata: TeamAlarmMeta(team: team), tintColor: Clique.green)
     }
 
     /// Set your own real alarm. `inOneMinute` rings 60 s from now for a quick test.
@@ -225,7 +225,7 @@ final class AppState {
         UNUserNotificationCenter.current().add(req)
     }
 
-    // MARK: Live Activity (driven by the stopwatch wake-up)
+    // MARK: Live Activity (driven by the home screen wake-up)
 
     func startActivity(team: Team, state: TeamWakeAttributes.ContentState) {
         let old = activity // capture now; the Task runs after `activity` is replaced below

@@ -30,12 +30,14 @@ struct SettingsTab: View {
                     TextField("First name", text: $app.first)
                     TextField("Last name", text: $app.last)
                 }
+                .listRowBackground(Clique.panel)
                 Section("Alarm") {
                     Picker("Sound", selection: $sound) {
                         ForEach(["Radar", "Apex", "Beacon", "Chimes"], id: \.self) { Text($0) }
                     }
                     Toggle("Vibration", isOn: $vibrate)
                 }
+                .listRowBackground(Clique.panel)
                 Section {
                     Toggle("Teammate Wake-Ups", isOn: $teammateAlerts)
                     Toggle("Live Activity", isOn: $liveActivity)
@@ -44,6 +46,7 @@ struct SettingsTab: View {
                 } footer: {
                     Text("Your team always sees when you snooze.")
                 }
+                .listRowBackground(Clique.panel)
                 Section {
                     Toggle("Coach Mode", isOn: $coachMode)
                     Button("Send Test Notification") { app.notify("Basketball", "Maya is up. 3 of 12 up.") }
@@ -54,7 +57,10 @@ struct SettingsTab: View {
                 } footer: {
                     if let e = app.lastError { Text(e) }
                 }
+                .listRowBackground(Clique.panel)
             }
+            .scrollContentBackground(.hidden)
+            .background(Clique.ink)
             .navigationTitle("Settings")
             .onChange(of: pick) { _, item in
                 Task {
