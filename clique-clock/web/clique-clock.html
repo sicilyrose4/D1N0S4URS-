@@ -211,6 +211,7 @@ input { font: inherit; color: inherit; }
 .av { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--panel); font-weight: 700; font-size: 15px; color: rgba(255,255,255,.75); flex: none; }
 .members .av { background: var(--ink); }
 .av.up { background: var(--green); color: var(--ink); }
+.av.on { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--green); }
 
 /* profile drawer */
 .prof { display: flex; gap: 16px; align-items: center; }
@@ -318,11 +319,13 @@ const S = {
   first: store.get("first", ""), last: store.get("last", ""),
   coach: store.get("coach", false), sound: store.get("sound", true),
   team: store.get("team", null),
+  teamCode: store.get("teamCode", null),   // live team this person belongs to
+  done: store.get("done", []),             // live alarm ids this browser already finished
   alarmAt: null,
 };
-function save() { ["onboarded","first","last","coach","sound","team"].forEach(k => store.set(k, S[k])); }
+function save() { ["onboarded","first","last","coach","sound","team","teamCode","done"].forEach(k => store.set(k, S[k])); syncSoon(); }
 const DEMO_TEAM = { name: "IXD Demo", sport: "Basketball", wake: [7,0], practice: [8,0], days: [2,4,6], coach: "Coach Wituk", rule: "Last up runs 2 laps", code: DEMO_CODE };
-const team = () => S.team || DEMO_TEAM;
+const team = () => (live() && L.team) || S.team || DEMO_TEAM;
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -442,10 +445,21 @@ function wirePage() {
       codes.querySelectorAll("span").forEach(s => s.remove());
       for (let i = 0; i < 6; i++) { const s = document.createElement("span"); s.textContent = flow.code[i] || ""; s.className = (i === flow.code.length ? "next " : "") + (flow.code[i] ? "full" : ""); codes.insertBefore(s, inp); }
       codes.classList.toggle("bad", flow.bad);
-      $("codeSub").textContent = (flow.bad ? "No team found. " : "") + "Prototype code: " + DEMO_CODE;
+      $("codeSub").textContent = L.on ? (flow.bad ? "No team with that code. Check with your coach." : "Enter the 6-character code from your coach.")
+        : (flow.bad ? "No team found. " : "") + "Prototype code: " + DEMO_CODE;
       $("joinBtn").disabled = flow.code.length !== 6;
     };
-    const tryJoin = () => { if (flow.code === DEMO_CODE) { S.team = null; save(); go(4); } else { flow.bad = true; draw(); } };
+    const tryJoin = async () => {
+      if (!L.on) { if (flow.code === DEMO_CODE) { S.team = null; save(); go(4); } else { flow.bad = true; draw(); } return; }
+      const code = flow.code, b = $("joinBtn"); b.disabled = true; b.textContent = "Joining…";
+      try {
+        const snap = await L.db.doc("teams/" + code).get();
+        if (flow.step !== 3) return;
+        if (snap.exists) { await joinTeam(code, false); go(4); return; }
+        flow.bad = true;
+      } catch (e) { toast("Couldn't join", writeErr(e)); }
+      if ($("joinBtn")) { $("joinBtn").textContent = "Join"; draw(); }
+    };
     inp.value = flow.code;
     inp.oninput = () => {
       flow.code = inp.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6); inp.value = flow.code; flow.bad = false; draw();
@@ -475,7 +489,9 @@ function wirePage() {
       const [wh, wm] = flow.wake.split(":").map(Number), [ph, pm] = flow.practice.split(":").map(Number);
       flow.madeCode = code;
       S.team = { name: flow.teamName.trim(), sport: flow.sport, wake: [wh, wm], practice: [ph, pm], days: flow.days, coach: S.last ? "Coach " + S.last : "Coach", rule: "Last up runs 2 laps", code };
-      save(); go(5);
+      if (!L.on) { save(); go(5); return; }
+      b.disabled = true; b.textContent = "Creating…";
+      createTeam(S.team).then(c => { flow.madeCode = c; go(5); }, e => { b.disabled = false; b.textContent = "Continue"; toast("Couldn't create the team", writeErr(e)); });
     };
   }
   if ($("share")) {
@@ -488,7 +504,10 @@ function wirePage() {
   }
 }
 $("back").onclick = () => go(flow.step - 1);
-function finish(coach) { S.coach = coach; S.onboarded = true; save(); sess.phase = "idle"; prepare(); show("home"); }
+function finish(coach) {
+  S.coach = coach; S.onboarded = true; save(); sess.phase = "idle"; prepare(); show("home");
+  if (live()) toast("You're on " + team().name, "Keep this page open. The team alarm rings here.");
+}
 
 // ================= DIAL =================
 function buildDial(el, size) {
@@ -532,28 +551,41 @@ const allUp = () => sess.mates.length && sess.wakes.length === sess.mates.length
 function prepare() {
   if (sess.phase !== "idle") return;
   const you = { id: "you", initials: initials(S.first, S.last), name: `${S.first} ${S.last}`.trim() || "You", wakeAt: null, you: true };
-  sess.mates = (S.coach ? [] : [you]).concat(MEMBERS.map(([f, l], i) => ({ id: (f + l).toLowerCase(), initials: initials(f, l), name: `${f} ${l}`, wakeAt: SCHED[i][0], snoozeAt: SCHED[i][1] })));
+  sess.mates = live() ? liveMates() : (S.coach ? [] : [you]).concat(MEMBERS.map(([f, l], i) => ({ id: (f + l).toLowerCase(), initials: initials(f, l), name: `${f} ${l}`, wakeAt: SCHED[i][0], snoozeAt: SCHED[i][1] })));
   sess.wakes = []; sess.t = 0;
   dial.badges.innerHTML = "";
   buildRows();
   renderControls();
 }
-function ring(startedAt) {
+function ring(startedAt, alarmId) {
   sess.phase = "idle"; prepare();
-  sess.start = startedAt || Date.now(); sess.stoppedAt = null; sess.phase = "ringing";
+  sess.start = startedAt || Date.now(); sess.stoppedAt = null; sess.phase = "ringing"; sess.alarmId = alarmId || null;
   sess.alarmClock = secToday(new Date(sess.start));
   $("home").classList.add("ringing");
-  if (!S.coach) { $("wakeTeam").textContent = team().name; show("wake"); $("wake").focus({ preventScroll: true }); }
-  if (!S.coach) Ringer.start();
+  // live: first learn who is already up (someone reopening the page late shouldn't be re-woken)
+  if (live() && alarmId) watchWakes(alarmId); else alertMe();
   renderControls();
+}
+function alertMe() {
+  if (S.coach || sess.phase !== "ringing" || wakeOf(ME())) return;
+  if (!$("sheet").hidden) closeSheet();
+  $("wakeTeam").textContent = team().name; show("wake"); $("wake").focus({ preventScroll: true });
+  Ringer.start();
+  if (S.sound && (!actx || actx.state !== "running")) toast("Your alarm is ringing", "No sound: this page wasn't tapped after it opened.");
 }
 function stopYou() {
   if (sess.phase !== "ringing" || S.coach) return;
-  sess.stoppedAt = elapsed(); sess.phase = "stopped"; wake("you");
+  sess.stoppedAt = elapsed(); sess.phase = "stopped"; wake(ME());
+  if (live() && sess.alarmId) L.db.doc(`teams/${L.code}/alarms/${sess.alarmId}/wakes/${L.uid}`).set({ at: Date.now() })
+    .catch(e => toast("Your team didn't hear you wake up", writeErr(e)));
   show("home"); renderControls();
-  if (!allUp()) toast("You're up.", "The alarm keeps going until your whole team is up.");
+  if (!allUp()) toast("You're up.", live() ? "Your team can see it. The alarm keeps going until everyone's up." : "The alarm keeps going until your whole team is up.");
 }
-function reset() { Ringer.stop(); sess.phase = "idle"; sess.start = 0; $("home").classList.remove("ringing"); prepare(); }
+function reset() {
+  if (live() && sess.alarmId && !S.done.includes(sess.alarmId)) { S.done = S.done.concat(sess.alarmId).slice(-30); save(); }
+  stopWakes(); sess.alarmId = null;
+  Ringer.stop(); sess.phase = "idle"; sess.start = 0; $("home").classList.remove("ringing"); prepare();
+}
 
 function restAngle(at) {
   let a = (at % 60) / 60 * 360 + 6;
@@ -563,10 +595,11 @@ function restAngle(at) {
 }
 function wake(id, at) {
   if (wakeOf(id)) return;
+  const m = sess.mates.find(x => x.id === id);
+  if (!m) return;
   at = at == null ? elapsed() : at;
   const w = { id, rank: sess.wakes.length + 1, at, angle: restAngle(at) };
   sess.wakes.push(w);
-  const m = sess.mates.find(x => x.id === id);
   const b = document.createElement("div"); b.className = "badge"; b.style.transform = `rotate(${w.angle}deg)`;
   b.innerHTML = ICON.up.replace('class="icon"', "") + `<b>${esc(m.initials)}</b>`;
   dial.badges.appendChild(b);
@@ -593,7 +626,7 @@ function buildRows() {
   const box = $("rows"); box.innerHTML = ""; rowEls = {};
   sess.mates.forEach(m => {
     const r = document.createElement("button"); r.className = "row";
-    r.innerHTML = `<span class="bar"></span><span class="nm">${esc(m.name)}${m.you ? "<small>you</small>" : ""}</span><span class="ic"></span>`;
+    r.innerHTML = `<span class="bar"></span><span class="nm">${esc(m.name)}<small></small></span><span class="ic"></span>`;
     r.onclick = () => { if (!m.you) openProfile(m); };
     if (m.you) r.style.cursor = "default";
     box.appendChild(r); rowEls[m.id] = r; r._s = null;
@@ -604,6 +637,8 @@ function updateRows(force) {
   let changed = false;
   sess.mates.forEach(m => {
     const r = rowEls[m.id], s = status(m);
+    const tag = m.you ? "you" : live() && !L.online.has(m.id) ? "not open" : "";
+    if (r._t !== tag) { r._t = tag; r.querySelector("small").textContent = tag; }
     if (r._s !== s) { r._s = s; r.dataset.s = s; r.querySelector(".ic").innerHTML = ICON[s]; r.setAttribute("aria-label", `${m.you ? "You" : m.name}, ${LABEL[s]}`); changed = true; }
   });
   if (changed || force) reorder();
@@ -626,7 +661,11 @@ function reorder() {   // woken first in rank order, then the rest; FLIP so rows
 
 function renderControls() {
   const c = $("controls");
-  if (sess.phase === "idle") {
+  if (sess.phase === "idle" && live()) {
+    const n = nextAlarm(Date.now());
+    c.innerHTML = `<button class="btn" id="setAlarm">${n ? "Alarm " + clockOf(n.at) : "Set Alarm"}</button><button class="btn quiet demo" id="invite">Invite</button>`;
+    $("setAlarm").onclick = openAlarm; $("invite").onclick = invite;
+  } else if (sess.phase === "idle") {
     const label = S.coach ? `Team ${hm(...team().wake)} ${ampm(team().wake[0])}` : S.alarmAt ? `Alarm ${hm(S.alarmAt.getHours(), S.alarmAt.getMinutes())} ${ampm(S.alarmAt.getHours())}` : "Set Alarm";
     c.innerHTML = `<button class="btn" id="setAlarm">${label}</button><button class="btn quiet demo" id="demo">Demo</button>`;
     $("setAlarm").onclick = S.coach ? openTeams : openAlarm;
@@ -639,7 +678,7 @@ function renderControls() {
   }
 }
 
-let lastClock = "", lastLead = "";
+let lastClock = "", lastLead = "", lastCtl = null;
 function frame() {
   const now = new Date();
   // the hand: real seconds while waiting, the alarm's run time after it rings
@@ -650,7 +689,13 @@ function frame() {
     sess.t = elapsed();
     sess.mates.forEach(m => { if (m.wakeAt != null && sess.t >= m.wakeAt) wake(m.id, m.wakeAt); });
   }
-  if (S.alarmAt && sess.phase === "idle" && now >= S.alarmAt) { const at = S.alarmAt.getTime(); S.alarmAt = null; ring(at); }
+  if (live()) {
+    if (sess.phase === "idle") {
+      const due = dueAlarm(now.getTime());
+      if (due) ring(due.at, due.id);
+      else { const k = (nextAlarm(now.getTime()) || {}).id || ""; if (k !== lastCtl) { lastCtl = k; renderControls(); } }
+    }
+  } else if (S.alarmAt && sess.phase === "idle" && now >= S.alarmAt) { const at = S.alarmAt.getTime(); S.alarmAt = null; ring(at); }
   if (!$("home").hidden || !$("wake").hidden) updateRows();
 
   const s = sess.phase === "idle" ? secToday(now) : sess.alarmClock + sess.t;
@@ -659,7 +704,8 @@ function frame() {
   if (ck !== lastClock) { lastClock = ck; $("clockT").textContent = hm(h, m); $("clockAP").textContent = ampm(h); }
   let lead;
   if (S.coach && sess.phase !== "idle") lead = `${sess.wakes.length} of ${sess.mates.length} up`;
-  else if (wakeOf("you")) { const ws = sess.alarmClock + wakeOf("you").at; lead = "woke at " + hm(Math.floor(ws / 3600) % 24, Math.floor(ws / 60) % 60); }
+  else if (wakeOf(ME())) { const ws = sess.alarmClock + wakeOf(ME()).at; lead = "woke at " + hm(Math.floor(ws / 3600) % 24, Math.floor(ws / 60) % 60); }
+  else if (live()) { const n = nextAlarm(now.getTime()), d = n && new Date(n.at); lead = n ? "alarm at " + hm(d.getHours(), d.getMinutes()) + dayTag(n.at) : "no alarm set"; }
   else if (S.alarmAt) lead = "alarm at " + hm(S.alarmAt.getHours(), S.alarmAt.getMinutes());
   else lead = S.coach ? "wake up at " + hm(...team().wake) : "no alarm set";
   const pr = "practice at " + hm(...team().practice);
@@ -682,6 +728,7 @@ $("scrim").onclick = closeSheet; $("sheetClose").onclick = closeSheet;
 addEventListener("keydown", e => { if (e.key === "Escape" && !$("sheet").hidden) closeSheet(); });
 
 function openAlarm() {
+  if (live()) return openTeamAlarm();
   const d = new Date(Date.now() + 2 * 60000);
   const v = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   openSheet("Your Alarm", `
@@ -704,19 +751,25 @@ function openAlarm() {
 
 function openTeams() {
   const T = team();
-  const people = (S.coach ? [] : [["You", initials(S.first, S.last), true]]).concat(MEMBERS.map(([f, l]) => [f, initials(f, l), false]));
+  const people = live()
+    ? L.members.map(m => [m.id === L.uid ? "You" : String(m.first || "Teammate") + (m.coach ? " (coach)" : ""), initials(String(m.first || ""), String(m.last || "")), m.id === L.uid, L.online.has(m.id)])
+    : (S.coach ? [] : [["You", initials(S.first, S.last), true]]).concat(MEMBERS.map(([f, l]) => [f, initials(f, l), false]));
   openSheet(T.name, `
     <div class="teamtime"><div class="display">${hm(...T.wake)} ${ampm(T.wake[0])}</div><span>${T.days.map(d => DAYNAMES[d - 1]).join(", ")} · Practice ${hm(...T.practice)} ${ampm(T.practice[0])}</span>
-      <span style="font-size:13px">${S.coach ? "Team code " + T.code : "Set by " + esc(T.coach)}</span></div>
+      <span style="font-size:13px">${live() ? "Team code " + esc(L.code) + " · Set by " + esc(T.coach) : S.coach ? "Team code " + T.code : "Set by " + esc(T.coach)}</span></div>
+    ${live() ? '<button class="btn quiet" id="tInvite">Invite Teammates</button>' : ""}
     ${S.coach ? `<div class="label">Coach</div><div class="group">
       <label class="item" for="tWake">Wake up<input type="time" id="tWake" value="${String(T.wake[0]).padStart(2, "0")}:${String(T.wake[1]).padStart(2, "0")}" style="background:var(--ink);border:0;color:var(--green);padding:6px 8px;font-weight:700"></label>
       <label class="item" for="tPrac">Practice<input type="time" id="tPrac" value="${String(T.practice[0]).padStart(2, "0")}:${String(T.practice[1]).padStart(2, "0")}" style="background:var(--ink);border:0;color:var(--green);padding:6px 8px;font-weight:700"></label></div>` : ""}
     <div class="label">Coach's rule</div><div class="group"><div class="item">${esc(T.rule)}</div></div>
     <div class="label">${people.length} members</div>
-    <div class="group members">${people.map(([n, i, you]) => `<div><span class="av ${you ? "up" : ""}">${esc(i)}</span>${esc(n)}</div>`).join("")}</div>`, b => {
+    <div class="group members">${people.map(([n, i, you, on]) => `<div><span class="av ${you ? "up" : ""} ${on ? "on" : ""}">${esc(i)}</span>${esc(n)}</div>`).join("")}</div>
+    ${live() ? `<p class="cap" style="margin:-8px 4px 0">Green ring: has Clique Clock open right now, so the alarm can reach them.</p>` : ""}`, b => {
+    if ($("tInvite")) $("tInvite").onclick = invite;
     if (!S.coach) return;
     const upd = () => {
       const [wh, wm] = $("tWake").value.split(":").map(Number), [ph, pm] = $("tPrac").value.split(":").map(Number);
+      if (live()) { L.db.doc("teams/" + L.code).update({ wake: [wh, wm], practice: [ph, pm], schedAt: Date.now() }).catch(e => toast("Couldn't save", writeErr(e))); return; }
       S.team = { ...T, wake: [wh, wm], practice: [ph, pm] }; save(); renderControls();
     };
     $("tWake").onchange = upd; $("tPrac").onchange = upd;
@@ -733,13 +786,15 @@ function openSettings() {
     <div class="group">${sw("sSound", S.sound, "Alarm sound")}</div>
     <div class="label">Prototype</div>
     <div class="group">${sw("sCoach", S.coach, "Coach mode")}
-      <button class="item" id="sReplay" style="width:100%;color:var(--green);font-weight:700">Replay Onboarding</button></div>
-    <p class="cap">Coach mode watches the team wake up instead of being woken. Names and settings are saved in this browser only.</p>`, b => {
+      <button class="item" id="sReplay" style="width:100%;color:var(--green);font-weight:700">${live() ? "Leave Team" : "Replay Onboarding"}</button></div>
+    <p class="cap">Coach mode watches the team wake up instead of being woken. ${live() ? "Your name and role sync to your team." : "Names and settings are saved in this browser only."}</p>`, b => {
     const nm = () => { S.first = $("sFirst").value.trim(); S.last = $("sLast").value.trim(); save(); $("sAv").textContent = initials(S.first, S.last); };
     $("sFirst").oninput = $("sLast").oninput = nm;
     const toggle = (id, key) => $(id).onclick = () => { S[key] = !S[key]; $(id).setAttribute("aria-checked", S[key]); save(); if (key === "sound" && !S.sound) Ringer.stop(); };
     toggle("sSound", "sound"); toggle("sCoach", "coach");
-    $("sReplay").onclick = () => { closeSheet(); reset(); S.onboarded = false; save(); flow.step = 0; flow.code = ""; renderPage(); show("onboard"); };
+    $("sReplay").onclick = () => {
+      if (live()) { const r = $("sReplay"); if (r.dataset.sure) { closeSheet(); leaveTeam(); } else { r.dataset.sure = 1; r.textContent = "Tap again to leave " + team().name; r.style.color = "#ff5a5a"; } return; }
+      closeSheet(); reset(); S.onboarded = false; save(); flow.step = 0; flow.code = ""; renderPage(); show("onboard"); };
   }, () => { if (sess.phase === "idle") prepare(); });
 }
 $("openTeams").onclick = openTeams;
@@ -752,10 +807,10 @@ function openProfile(m) {
   let timer = null;
   openSheet("", `
     <div class="prof"><span class="av" id="pAv">${esc(m.initials)}</span><div><h3>${esc(m.name)}</h3><p id="pStatus"></p></div></div>
-    <div class="stats"><div><b>6:0${fakeStat(m.id, 1, 9)} AM</b><span>Avg wake</span></div><div><b>${fakeStat(m.id + "s", 2, 8)} days</b><span>Streak</span></div><div><b>${fakeStat(m.id + "l", 0, 4)}×</b><span>Last up</span></div></div>
+    <div class="stats" ${live() ? "hidden" : ""}><div><b>6:0${fakeStat(m.id, 1, 9)} AM</b><span>Avg wake</span></div><div><b>${fakeStat(m.id + "s", 2, 8)} days</b><span>Streak</span></div><div><b>${fakeStat(m.id + "l", 0, 4)}×</b><span>Last up</span></div></div>
     <div class="lamp" id="lamp"><div class="ripples"><i class="rip"></i><i class="rip"></i><i class="rip"></i></div><div class="rim"></div><button class="bulb" id="bulb" aria-hidden="true" tabindex="-1">${ICON.flash}</button></div>
     <button class="btn" id="flashBtn"></button>
-    <p class="cap" style="text-align:center;margin:0">Prototype: flashes this screen for now.</p>`, b => {
+    <p class="cap" style="text-align:center;margin:0" id="pCap">Prototype: flashes this screen for now.</p>`, b => {
     const paint = () => {
       const s = status(m), c = { up: "var(--green)", snoozing: "var(--green)", asleep: "var(--blood)", waiting: "rgba(255,255,255,.6)" }[s];
       const w = wakeOf(m.id);
@@ -767,16 +822,18 @@ function openProfile(m) {
       const asleep = s !== "up";
       $("flashBtn").textContent = asleep ? `Flash ${first}'s Phone` : `${first} is up`;
       $("flashBtn").disabled = !asleep; $("lamp").classList.toggle("awake", !asleep);
+      if (live()) $("pCap").textContent = L.online.has(m.id) ? `Flashes ${first}'s screen and buzzes their phone.` : `${first} doesn't have Clique Clock open right now.`;
     };
     const flash = () => {
       if (status(m) === "up") return;
       const lamp = $("lamp"), fx = $("flashfx"); lamp.classList.add("flashing");
       let n = 0; clearInterval(timer);
       timer = setInterval(() => {
-        const on = n % 2 === 0; lamp.classList.toggle("on", on); fx.style.opacity = on && !reduced ? .85 : 0;
+        const on = n % 2 === 0; lamp.classList.toggle("on", on); fx.style.opacity = on && !reduced && !live() ? .85 : 0;
         if (++n >= 10) { clearInterval(timer); lamp.classList.remove("on", "flashing"); fx.style.opacity = 0; }
       }, 130);
       if (navigator.vibrate) try { navigator.vibrate([80, 60, 80]); } catch {}
+      if (live() && L.tr) L.tr.emit("flash", { to: m.id }).catch(() => {});
     };
     $("flashBtn").onclick = flash; $("bulb").onclick = flash;
     paint(); timer = null;
@@ -784,9 +841,220 @@ function openProfile(m) {
   }, () => { clearInterval(timer); $("flashfx").style.opacity = 0; });
 }
 
+// ================= LIVE: a real team, shared through the artifact =================
+// Only inside the published page (db + user + room). Anywhere else it stays the solo demo.
+//   teams/<CODE>                          team doc: name, times, days, coach, rule, alarm {at,id,by}
+//   teams/<CODE>/members/<uid>            first, last, coach, joinedAt
+//   teams/<CODE>/alarms/<alarmId>/wakes/<uid>   { at }  (when that person tapped stop)
+//   data/users/<uid>/profile              private: which team I'm on, my name
+// Room "team-<code>": presence = who has the page open; topic "flash" = wake a sleeper.
+const L = { on: false, db: null, user: null, room: null, tr: null, uid: null, code: null, team: null, members: [], online: new Set(), wakeDocs: [], unsub: [], wakeUnsub: null, seenAlarm: null };
+function live() { return L.on && !!S.teamCode; }
+function ME() { return live() ? L.uid : "you"; }
+const WINDOW = 30 * 60 * 1000;   // an alarm still rings for someone who opens the page up to 30 min late
+const newCode = () => Array.from({ length: 6 }, () => "ABCDEFGHJKMNPQRSTUVWXYZ23456789"[Math.random() * 31 | 0]).join("");
+const clockOf = ms => { const d = new Date(ms); return `${hm(d.getHours(), d.getMinutes())} ${ampm(d.getHours())}`; };
+function dayTag(ms) { const d = new Date(ms), t = new Date(); if (d.toDateString() === t.toDateString()) return ""; t.setDate(t.getDate() + 1); return d.toDateString() === t.toDateString() ? " tmrw" : " " + DAYNAMES[d.getDay()]; }
+function who(id) { const m = L.members.find(x => x.id === id); return m && m.first ? String(m.first) : "A teammate"; }
+function writeErr(e) {
+  const c = e && e.code;
+  if (c === "invalid_argument") return "This account can't change the team. Ask whoever shared the link for edit access.";
+  if (c === "quota_exceeded") return "The team's storage is full.";
+  return "Check your connection and try again.";
+}
+
+// every alarm the team has: the weekly schedule (from team times + days) plus one-off alarms anyone sets
+function alarmList() {
+  const T = L.team; if (!T) return [];
+  const out = [];
+  if (Array.isArray(T.days) && Array.isArray(T.wake)) for (let i = -1; i < 8; i++) {
+    const d = new Date(); d.setDate(d.getDate() + i); d.setHours(T.wake[0], T.wake[1], 0, 0);
+    if (T.days.includes(d.getDay() + 1) && d.getTime() > (T.schedAt || 0))
+      out.push({ id: `s${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}-${T.wake[0]}${String(T.wake[1]).padStart(2, "0")}`, at: d.getTime() });
+  }
+  if (T.alarm && typeof T.alarm.at === "number" && typeof T.alarm.id === "string") out.push({ id: T.alarm.id, at: T.alarm.at });
+  return out.sort((a, b) => a.at - b.at);
+}
+const dueAlarm = now => alarmList().find(a => now >= a.at && now - a.at < WINDOW && !S.done.includes(a.id));
+const nextAlarm = now => alarmList().find(a => a.at > now);
+
+function liveMates() {
+  return L.members.filter(m => !m.coach)
+    .map(m => { const f = String(m.first || ""), l = String(m.last || ""); return { id: m.id, initials: initials(f, l), name: `${f} ${l}`.trim() || "Teammate", you: m.id === L.uid, wakeAt: null }; })
+    .sort((a, b) => b.you - a.you);
+}
+
+function attachTeam(code) {
+  detachTeam(); L.code = code;
+  const t = L.db.doc("teams/" + code);
+  let heard = false;
+  const slow = setTimeout(() => { if (!heard) toast("Can't reach your team yet", "Check your connection. The alarm needs it."); }, 10000);
+  L.unsub.push(t.onSnapshot(s => {
+    if (s.metadata.fromCache && !s.exists) return;
+    heard = true; clearTimeout(slow); L.team = s.exists ? s.data() : null; onTeam();
+  }, () => { clearTimeout(slow); toast("Lost touch with your team", "Reload the page to reconnect."); }));
+  L.unsub.push(t.collection("members").onSnapshot(q => {
+    L.members = q.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+    onMembers();
+  }, () => {}));
+  if (L.room) L.room.join("team-" + code.toLowerCase()).then(r => {
+    if (L.code !== code) { r.leave().catch(() => {}); return; }
+    L.tr = r;
+    r.presence({ uid: L.uid }).catch(() => {});
+    L.unsub.push(r.onPeers(() => { L.online = new Set(r.peers().map(p => p.by || (p.presence && p.presence.uid)).filter(x => typeof x === "string")); }, () => {}));
+    L.unsub.push(r.on("flash", msg => { const d = msg.data; if (d && d.to === L.uid && !msg.sameTab) flashMe(msg.by); }, () => {}));
+    L.unsub.push(() => { r.leave().catch(() => {}); });
+  }).catch(() => {});
+}
+function detachTeam() {
+  L.unsub.forEach(f => { try { f(); } catch {} }); L.unsub = [];
+  stopWakes(); L.tr = null; L.code = null; L.team = null; L.members = []; L.online = new Set(); L.seenAlarm = null;
+}
+function onTeam() {
+  const T = L.team; if (!T) return;
+  const a = T.alarm && T.alarm.id;
+  if (a && L.seenAlarm !== null && a !== L.seenAlarm && T.alarm.by !== L.uid && T.alarm.at > Date.now())
+    toast("New team alarm", `${who(T.alarm.by)} set it for ${clockOf(T.alarm.at)}${dayTag(T.alarm.at)}. Keep this page open.`);
+  L.seenAlarm = a || "";
+  if (sess.phase === "ringing" && sess.alarmId && !alarmList().some(x => x.id === sess.alarmId)) { reset(); toast("Alarm cancelled", ""); return; }
+  if (sess.phase === "idle") prepare(); else renderControls();
+  lastLead = ""; lastCtl = null;
+}
+function onMembers() {
+  if (sess.phase === "idle") { prepare(); return; }
+  const keep = sess.wakes; sess.mates = liveMates(); sess.wakes = keep.filter(w => sess.mates.some(m => m.id === w.id));
+  buildRows(); applyWakes();
+}
+
+// who's up for the alarm that's ringing
+function watchWakes(id) {
+  stopWakes(); L.wakeDocs = [];
+  let first = true;
+  const go = () => { if (first) { first = false; clearTimeout(fb); alertMe(); } };
+  const fb = setTimeout(go, 2500);
+  const unsub = L.db.collection(`teams/${L.code}/alarms/${id}/wakes`).onSnapshot(q => {
+    L.wakeDocs = q.docs.map(d => ({ id: d.id, at: Number(d.data().at) || Date.now() })).sort((a, b) => a.at - b.at);
+    applyWakes();
+    if (!q.metadata.fromCache) go();
+  }, () => go());
+  L.wakeUnsub = () => { clearTimeout(fb); unsub(); };
+}
+function stopWakes() { if (L.wakeUnsub) L.wakeUnsub(); L.wakeUnsub = null; }
+function applyWakes() {
+  if (sess.phase === "idle") return;
+  L.wakeDocs.forEach(w => { if (!wakeOf(w.id)) wake(w.id, Math.max(0, (w.at - sess.start) / 1000)); });
+  if (sess.phase === "ringing" && !S.coach && wakeOf(ME())) { sess.phase = "stopped"; show("home"); renderControls(); }
+}
+
+function flashMe(by) {
+  if (sess.phase !== "ringing" || S.coach || wakeOf(ME())) return;
+  const fx = $("flashfx"); let n = 0; clearInterval(flashMe.t);
+  if (!reduced) flashMe.t = setInterval(() => { fx.style.opacity = n % 2 === 0 ? .9 : 0; if (++n >= 12) { clearInterval(flashMe.t); fx.style.opacity = 0; } }, 130);
+  if (navigator.vibrate) try { navigator.vibrate([200, 100, 200, 100, 200]); } catch {}
+  toast(`${who(by)} is flashing you`, "Get up!");
+}
+
+async function joinTeam(code, coach) {
+  await L.db.doc(`teams/${code}/members/${L.uid}`).set({ first: S.first, last: S.last, coach, joinedAt: Date.now() });
+  S.teamCode = code; S.coach = coach; save(); attachTeam(code);
+}
+async function createTeam(T) {
+  let code = T.code;
+  for (let i = 0; i < 5; i++) { const s = await L.db.doc("teams/" + code).get(); if (!s.exists) break; code = newCode(); }
+  const now = Date.now(), doc = { ...T, code, createdAt: now, schedAt: now, alarm: null };
+  await L.db.doc("teams/" + code).set(doc);
+  S.team = doc;
+  await joinTeam(code, true);
+  return code;
+}
+async function leaveTeam() {
+  try { await L.db.doc(`teams/${S.teamCode}/members/${L.uid}`).delete(); } catch {}
+  reset(); detachTeam();
+  S.teamCode = null; S.team = null; S.onboarded = false; save();
+  flow.step = 0; flow.code = ""; flow.role = null; renderPage(); show("onboard");
+}
+
+function openTeamAlarm() {
+  const T = team(), d = new Date(Date.now() + 2 * 60000);
+  const v = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const cur = T.alarm && T.alarm.at > Date.now() ? T.alarm : null;
+  openSheet("Team Alarm", `
+    <div class="timepick"><input type="time" id="aTime" value="${v}" aria-label="Alarm time"></div>
+    <p class="cap" style="margin:0;text-align:center">Rings for everyone on ${esc(T.name)} who has Clique Clock open. Phones need this page open with the screen on.</p>
+    <button class="btn" id="aSet">Set Team Alarm</button>
+    <button class="btn quiet" id="aSoon">Ring Everyone in 10 Seconds</button>
+    ${cur ? `<button class="danger" id="aOff">Cancel the ${clockOf(cur.at)} alarm</button>` : ""}`, () => {
+    const put = async (at, title, sub) => {
+      audio();
+      try {
+        await L.db.doc("teams/" + L.code).update({ alarm: at ? { at, id: "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), by: L.uid } : null });
+        closeSheet(); renderControls(); toast(title, sub);
+      } catch (e) { toast("Couldn't set the alarm", writeErr(e)); }
+    };
+    $("aSet").onclick = () => {
+      const [h, m] = ($("aTime").value || v).split(":").map(Number);
+      const t = new Date(); t.setHours(h, m, 0, 0); if (t <= new Date()) t.setDate(t.getDate() + 1);
+      put(t.getTime(), "Team alarm set", `${clockOf(t.getTime())}${dayTag(t.getTime())} for everyone. Leave this page open.`);
+    };
+    $("aSoon").onclick = () => put(Date.now() + 10000, "Ringing everyone", "In 10 seconds.");
+    if ($("aOff")) $("aOff").onclick = () => put(null, "Team alarm cancelled", "");
+  });
+}
+function invite() {
+  const T = team(), txt = `Join ${T.name} on Clique Clock: open the Clique Clock link and enter team code ${L.code}.`;
+  const fail = () => toast("Team code " + L.code, "Send your teammates the link and this code.");
+  try { navigator.clipboard.writeText(txt).then(() => toast("Invite copied", `Send it with the link. Team code ${L.code}.`), fail); } catch { fail(); }
+}
+
+// keep my private profile + my member row in step with my name/role (debounced, one write at a time)
+let syncT = null, syncChain = Promise.resolve(), lastProf = "";
+function syncSoon() { if (!L.on) return; clearTimeout(syncT); syncT = setTimeout(() => { syncChain = syncChain.then(syncNow, syncNow); }, 700); }
+async function syncNow() {
+  const prof = { first: S.first, last: S.last, coach: !!S.coach, teamCode: S.teamCode || null }, pj = JSON.stringify(prof);
+  if (pj !== lastProf) { try { await L.db.doc(`data/users/${L.uid}/profile`).set(prof); lastProf = pj; } catch {} }
+  const mine = S.teamCode && L.members.find(m => m.id === L.uid);
+  if (mine && (mine.first !== S.first || mine.last !== S.last || !!mine.coach !== !!S.coach))
+    try { await L.db.doc(`teams/${S.teamCode}/members/${L.uid}`).update({ first: S.first, last: S.last, coach: !!S.coach }); } catch {}
+}
+
+// keep the screen awake while a live team is on (best effort; browsers may refuse)
+let wakeLock = null;
+addEventListener("pointerdown", () => {
+  if (live() && !wakeLock && navigator.wakeLock) navigator.wakeLock.request("screen").then(l => { wakeLock = l; l.addEventListener("release", () => { wakeLock = null; }); }, () => {});
+});
+
+async function boot() {
+  if (!window.claude || typeof window.claude.use !== "function") return;
+  const [db, user] = await Promise.all([window.claude.use("db"), window.claude.use("user")]);
+  if (!db || !user) return;
+  const uid = await user.id(); if (!uid) return;
+  Object.assign(L, { db, user, uid, on: true });
+  let prof = null;
+  try { const s = await db.doc(`data/users/${uid}/profile`).get(); if (s.exists) prof = s.data(); } catch {}
+  if (prof) {
+    S.first = String(prof.first || S.first); S.last = String(prof.last || S.last); S.coach = !!prof.coach;
+    S.teamCode = typeof prof.teamCode === "string" ? prof.teamCode : null;
+    lastProf = JSON.stringify({ first: S.first, last: S.last, coach: S.coach, teamCode: S.teamCode });
+  } else {
+    S.teamCode = null;
+    if (!S.first) { const me = await user.me(); if (me.name) { const parts = me.name.trim().split(/\s+/); S.first = parts[0] || ""; S.last = parts.slice(1).join(" "); } }
+  }
+  L.room = await window.claude.use("room");
+  if (S.teamCode) {
+    attachTeam(S.teamCode); S.onboarded = true; save(); reset(); show("home");
+    setTimeout(() => toast("Tap anywhere to arm your alarm", "Browsers keep sound off until you tap. Then leave this page open."), 800);
+  } else {
+    // the old solo demo doesn't count as a team here: join or create a real one
+    const wasHome = S.onboarded;
+    S.onboarded = false; S.team = null; save(); reset();
+    if (wasHome || flow.step === 0) { flow.step = 0; renderPage(); show("onboard"); }
+  }
+}
+
 // ---------- start ----------
 prepare();
 if (S.onboarded) show("home"); else { renderPage(); show("onboard"); }
 requestAnimationFrame(frame);
+boot().catch(() => {});
 })();
 </script>
