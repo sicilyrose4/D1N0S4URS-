@@ -4,8 +4,8 @@ Snapshot taken 2026-11-22 23:06 CST. App: https://sicilyrose4.github.io/team-ala
 
 | Metric | Count |
 |---|---|
-| Unique users (devices that opened the app) | 0 |
-| App opens | 0 |
+| Unique users (devices that opened the app) | 1 |
+| App opens | 1 |
 | Signed up as a player | 0 |
 | Signed up as a coach | 0 |
 | Teams created | 0 |
