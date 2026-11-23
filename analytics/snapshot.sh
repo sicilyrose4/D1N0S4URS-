@@ -2,7 +2,7 @@
 # Pulls the live Team Alarm counts and rewrites analytics/latest.md.
 # Run from the repo root:  bash analytics/snapshot.sh
 set -euo pipefail
-export TZ="America/Los_Angeles"   # the app counts days in the phone's local time
+export TZ="America/Chicago"   # the app counts days in the phone's local time
 NS="d1n0s4urs-team-alarm"
 API="https://abacus.jasoncameron.dev/get/$NS"
 DIR="$(cd "$(dirname "$0")" && pwd)"
