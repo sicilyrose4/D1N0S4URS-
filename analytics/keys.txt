@@ -1,0 +1,13 @@
+users|Unique users (devices that opened the app)
+visits|App opens
+signup-player|Signed up as a player
+signup-coach|Signed up as a coach
+teams|Teams created
+joins|Players who joined a team
+alarms|Alarms created
+rings|Alarms that rang on a phone
+wakeups|"I'm up" taps
+snoozes|Snoozes
+excuses|Excuse requests sent
+excuse-approved|Excuses approved
+excuse-denied|Excuses denied

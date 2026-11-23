@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team Alarm Analytics</title>
+<link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--blue:#1933F3;--lime:#CAFE2D;--purple:#6B42FF;--navy:#01143C;--bg:#F3F4FA;--muted:#6b7090;--f:"Urbanist",system-ui,sans-serif}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--navy);font-family:var(--f);padding:32px 20px 60px}
+main{max-width:860px;margin:0 auto}
+.date{font:600 15px var(--f);color:var(--muted)}
+h1{font:800 36px/1.1 var(--f);margin-top:4px}
+.hero{background:var(--blue);color:#fff;border-radius:30px;padding:26px;margin-top:24px;display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.hero b{display:block;font:800 96px/1 var(--f);color:var(--lime);letter-spacing:-3px;font-variant-numeric:tabular-nums}
+.hero small{font:700 16px var(--f);opacity:.85}
+.hero .side{text-align:right}.hero .side b{font-size:44px;letter-spacing:-1px}
+.sec{font:800 13px var(--f);letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);margin:30px 2px 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.card{background:#fff;border-radius:22px;padding:16px 18px}
+.card b{display:block;font:800 34px var(--f);font-variant-numeric:tabular-nums}
+.card small{font:700 14px var(--f);color:var(--muted)}
+.bars{background:#fff;border-radius:22px;padding:20px 18px 14px;display:flex;align-items:flex-end;gap:6px;height:220px}
+.bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:6px;min-width:0}
+.bar i{display:block;width:100%;background:var(--purple);border-radius:8px 8px 4px 4px;min-height:3px}
+.bar.today i{background:var(--blue)}
+.bar span{font:700 11px var(--f);color:var(--muted);white-space:nowrap}
+.bar em{font:800 12px var(--f);font-style:normal}
+p.note{font:600 14px/1.45 var(--f);color:var(--muted);margin-top:26px}
+a{color:var(--blue)}
+</style>
+</head>
+<body>
+<main>
+  <div class="date" id="stamp">Loading live numbers...</div>
+  <h1>Team Alarm analytics</h1>
+  <div class="hero"><div><b id="users">–</b><small>unique users</small></div><div class="side"><b id="today">–</b><small>users today</small></div></div>
+  <div class="sec">Daily users, last 14 days</div>
+  <div class="bars" id="bars"></div>
+  <div class="sec">What people did</div>
+  <div class="grid" id="grid"></div>
+  <p class="note">Counts are anonymous: the app only sends "+1" for an event, never names or teams. A user is one device the first time it opens
+    <a href="https://sicilyrose4.github.io/team-alarm-tasks/">the app</a>. Numbers come live from abacus.jasoncameron.dev (namespace <code>d1n0s4urs-team-alarm</code>).</p>
+</main>
+<script>
+const API = 'https://abacus.jasoncameron.dev/get/d1n0s4urs-team-alarm/';
+const KEYS = [['visits', 'App opens'], ['signup-player', 'Player sign-ups'], ['signup-coach', 'Coach sign-ups'], ['teams', 'Teams created'], ['joins', 'Team joins'],
+  ['alarms', 'Alarms created'], ['rings', 'Alarms rang'], ['wakeups', '"I\'m up" taps'], ['snoozes', 'Snoozes'], ['excuses', 'Excuse requests'], ['excuse-approved', 'Excuses approved'], ['excuse-denied', 'Excuses denied']];
+const get = k => fetch(API + k).then(r => r.json()).then(j => Math.max(0, j.value || 0)).catch(() => 0);
+const dkey = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+(async () => {
+  const days = [...Array(14)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() - 13 + i); return d; });
+  const [users, vals, daily] = await Promise.all([get('users'), Promise.all(KEYS.map(k => get(k[0]))), Promise.all(days.map(d => get('day-' + dkey(d))))]);
+  document.getElementById('users').textContent = users;
+  document.getElementById('today').textContent = daily[13];
+  document.getElementById('grid').innerHTML = KEYS.map((k, i) => `<div class="card"><b>${vals[i]}</b><small>${k[1]}</small></div>`).join('');
+  const max = Math.max(1, ...daily);
+  document.getElementById('bars').innerHTML = days.map((d, i) => `<div class="bar ${i === 13 ? 'today' : ''}"><em>${daily[i] || ''}</em><i style="height:${daily[i] / max * 150}px"></i><span>${d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' })}</span></div>`).join('');
+  document.getElementById('stamp').textContent = 'Live as of ' + new Date().toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+})();
+</script>
+</body>
+</html>
