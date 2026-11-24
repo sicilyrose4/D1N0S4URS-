@@ -1,16 +1,16 @@
 # Team Alarm analytics
 
-Snapshot taken 2026-11-23 19:21 CST. App: https://sicilyrose4.github.io/team-alarm-tasks/
+Snapshot taken 2026-11-24 17:20 CST. App: https://sicilyrose4.github.io/team-alarm-tasks/
 
 | Metric | Count |
 |---|---|
-| Unique users (devices that opened the app) | 2 |
-| App opens | 34 |
+| Unique users (devices that opened the app) | 8 |
+| App opens | 44 |
 | Signed up as a player | 1 |
-| Signed up as a coach | 0 |
-| Teams created | 4 |
+| Signed up as a coach | 2 |
+| Teams created | 6 |
 | Players who joined a team | 2 |
-| Alarms created | 2 |
+| Alarms created | 3 |
 | Alarms that rang on a phone | 1 |
 | "I'm up" taps | 1 |
 | Snoozes | 0 |
@@ -22,7 +22,8 @@ Snapshot taken 2026-11-23 19:21 CST. App: https://sicilyrose4.github.io/team-ala
 
 | Day | Users |
 |---|---|
-| 2026-11-23 | 2 |
+| 2026-11-24 | 7 |
+| 2026-11-23 | 3 |
 | 2026-11-22 | 0 |
 | 2026-11-21 | 0 |
 | 2026-11-20 | 0 |
@@ -35,4 +36,3 @@ Snapshot taken 2026-11-23 19:21 CST. App: https://sicilyrose4.github.io/team-ala
 | 2026-11-13 | 0 |
 | 2026-11-12 | 0 |
 | 2026-11-11 | 0 |
-| 2026-11-10 | 0 |
